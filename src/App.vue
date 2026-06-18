@@ -255,7 +255,7 @@ const maybeStartTutorial = () => {
         <dotrino-support
           class="topbar-coin"
           href="https://ko-fi.com/dotrino"
-          repo="dotrino/dotrino-messenger"
+          repo="imdotrino/dotrino-messenger"
           discord="https://discord.gg/D648uq7cth"
         ></dotrino-support>
       </div>

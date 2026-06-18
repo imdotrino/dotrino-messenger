@@ -23,7 +23,7 @@ This extension is part of the open-source [Dotrino](https://github.com/imdotrino
 
 ## What the proxy server sees
 
-The relay at `wss://proxy.dotrino.com` (open source, [dotrino/simple-websocket-proxy](https://github.com/imdotrino/simple-websocket-proxy)) sees:
+The relay at `wss://proxy.dotrino.com` (open source, [imdotrino/dotrino-proxy](https://github.com/imdotrino/dotrino-proxy)) sees:
 
 - The **ciphertext** of your messages (it cannot decrypt them).
 - The **public keys** of senders and recipients (this is required to route).

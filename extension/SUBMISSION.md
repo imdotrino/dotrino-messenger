@@ -51,7 +51,7 @@ Step-by-step from "code on disk" to "approved & public listing".
 ## 5. Post-approval
 
 - The extension goes live at `https://chromewebstore.google.com/detail/<id>` within ~30 minutes of approval.
-- Update the README + the landing page (`dotrino/src/App.vue`) to point to that URL instead of the GitHub repo install instructions.
+- Update the README + the landing page (`dotrino-home/src/App.vue`) to point to that URL instead of the GitHub repo install instructions.
 - Subsequent updates: bump `version`, re-zip, re-upload — review on updates is normally faster (~24 h) unless the diff touches permissions.
 
 ## Useful URLs
