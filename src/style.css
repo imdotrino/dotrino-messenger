@@ -1,0 +1,160 @@
+/* Dotrino — Warm Sand design tokens.
+   Light mode, arena/cream backgrounds, terracotta brand accent. */
+:root {
+  /* Surfaces (arena, warm) */
+  --bg-1: #faf3e7;          /* main background (chat area) */
+  --bg-2: #f5ede0;          /* sidebar, cards */
+  --bg-3: #ede2cf;          /* nested cards, hover */
+  --bg-4: #e0d3ba;          /* inputs, separators */
+
+  /* Text */
+  --text:  #2b211a;          /* deep brown, not pure black */
+  --muted: #8a7a66;          /* taupe */
+  --on-accent: #ffffff;
+
+  /* Borders / outlines */
+  --border:        #d4c4a8;
+  --border-strong: #b8a685;
+
+  /* Brand accents */
+  --accent:    #c0392b;      /* terracotta primary */
+  --accent-2:  #a93226;      /* terracotta hover */
+  --danger:    #b03a2e;      /* same family for danger */
+
+  /* Trust UI */
+  --gold:    #d4a72c;        /* own ratings (mustard gold) */
+  --derived: #a37a45;        /* peer-derived (bronze/copper) */
+
+  /* Status */
+  --online: #5a8a3a;         /* olive green */
+
+  /* Typography */
+  --font-headline: "Space Grotesk", system-ui, sans-serif;
+  --font-body:     "Inter", system-ui, sans-serif;
+  --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+
+/* Cuando la PWA se carga como iframe desde la extensión (popup, overlay,
+   offscreen), `?embed=...` añade `cc-embed` al <html>. En ese caso usamos
+   100% del iframe y compactamos espacios para evitar overflow en 360x540. */
+html.cc-embed, html.cc-embed body, html.cc-embed #app { height: 100%; min-height: 0; }
+/* Permitimos scroll vertical en .app dentro del iframe: si algún contenido
+   no entra (sidebar largo, modal, etc.), preferimos scroll antes que
+   recorte invisible. La conversación en sí mantiene su propio scroll
+   interno por .messages. */
+html.cc-embed .app { height: 100%; overflow-y: auto; overflow-x: hidden; }
+html.cc-embed .topbar { padding: 8px 12px; }
+html.cc-embed .topbar .brand-name { display: none; }
+html.cc-embed .topbar .logo { width: 28px; height: 28px; }
+html.cc-embed .topbar .me-avatar { width: 30px; height: 30px; }
+html.cc-embed .topbar .install-btn { display: none; }
+html.cc-embed .topbar .me { padding: 4px 8px; font-size: 12px; }
+html.cc-embed .topbar .me .tok { font-size: 11px; padding: 2px 6px; }
+html.cc-embed .side-head { padding: 10px 14px; }
+html.cc-embed .layout .sidebar { width: 100%; max-width: 100%; }
+html.cc-embed .layout { position: relative; }
+/* Modo móvil-like: una columna a la vez. */
+html.cc-embed .layout .sidebar { display: none; }
+html.cc-embed .layout .main-pane { display: flex; }
+html.cc-embed .layout.show-side .sidebar { display: flex; }
+html.cc-embed .layout.show-side .main-pane { display: none; }
+body {
+  background: var(--bg-1);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 {
+  font-family: var(--font-headline);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+button { font-family: inherit; }
+
+input, textarea {
+  background: #ffffff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-radius: 12px;
+  font: inherit;
+  font-family: var(--font-body);
+  transition: border-color 180ms ease-out, box-shadow 180ms ease-out;
+}
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.12);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); }
+
+/* Modal scaffolding (reused by every modal) */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(43, 33, 26, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; padding: 16px;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.modal {
+  background: var(--bg-1);
+  border-radius: 12px;
+  padding: 0;
+  max-width: 480px;
+  width: 100%;
+  box-shadow:
+    0 1px 2px rgba(120, 80, 50, 0.08),
+    0 12px 36px rgba(120, 80, 50, 0.18);
+  overflow: hidden;
+}
+.modal h2 { margin: 0; font-size: 20px; font-weight: 600; }
+
+/* Buttons */
+.btn {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 0;
+  padding: 10px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: var(--font-body);
+  transition: background 150ms ease-out, transform 100ms ease-out;
+}
+.btn:hover:not(:disabled) { background: var(--accent-2); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+.btn.secondary:hover:not(:disabled) { background: var(--bg-3); }
+.btn.danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+.btn.danger:hover:not(:disabled) { background: rgba(176, 58, 46, 0.08); }
+.btn.icon {
+  padding: 0; width: 40px; height: 40px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Scrollbars (light theme) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-4);
+  border-radius: 8px;
+  border: 2px solid var(--bg-1);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2c3e50" />
+    <!-- Sin esto, el navegador cachea index.html por ~10 min y el SW puede
+         servir HTML viejo que apunta a chunks JS ya renombrados por la
+         siguiente build → 404 en assets/index-XXX.js. -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Dotrino Messenger</title>
+    <meta name="description" content="Mensajería 1-a-1 con cifrado de extremo a extremo (ECDH+AES-GCM), contactos compartidos entre apps del ecosistema y mensajes offline (hasta 24 h). PWA + extensión." />
+    <link rel="canonical" href="https://messenger.dotrino.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="Dotrino" />
+    <meta property="og:title" content="Dotrino Messenger" />
+    <meta property="og:description" content="Mensajería 1-a-1 con cifrado de extremo a extremo. Tus mensajes, en tu servidor." />
+    <meta property="og:url" content="https://messenger.dotrino.com/" />
+    <meta property="og:image" content="https://messenger.dotrino.com/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Dotrino Messenger" />
+    <meta name="twitter:description" content="Mensajería 1-a-1 con cifrado de extremo a extremo." />
+    <meta name="twitter:image" content="https://messenger.dotrino.com/og.jpg" />
+    <!-- Analítica cookieless autohosteada (GoatCounter); no cuenta en localhost/LAN. -->
+    <script>window.goatcounter={path:function(p){return location.hostname+p}}</script>
+    <script data-goatcounter="https://goat.dotrino.com/count" async src="https://goat.dotrino.com/count.js"></script>
+      <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Dotrino Messenger",
+      "url": "https://messenger.dotrino.com/",
+      "description": "Mensajería 1-a-1 con cifrado de extremo a extremo. Tus mensajes, en tu servidor.",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Web",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "publisher": { "@type": "Organization", "name": "Dotrino", "url": "https://dotrino.com/" }
+    }
+    </script>
+</head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

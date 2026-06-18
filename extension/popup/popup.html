@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { width: 360px; height: 540px; margin: 0; padding: 0; overflow: hidden; }
+    iframe { width: 100%; height: 100%; border: 0; background: #1b2533; }
+  </style>
+</head>
+<body>
+  <!--
+    Sin `sandbox`: aunque tenía allow-same-origin, Chrome restringe APIs
+    como crypto.randomUUID en iframes sandboxed, y rompe el lib del store
+    (sync.js getDeviceId). messenger.dotrino.com es nuestro propio origen
+    con host_permissions explícitas, no necesita sandbox extra.
+  -->
+  <iframe src="https://messenger.dotrino.com/?embed=popup"
+          allow="clipboard-read; clipboard-write"></iframe>
+  <script src="../identity-bridge-host.js"></script>
+</body>
+</html>

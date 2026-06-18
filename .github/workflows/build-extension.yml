@@ -1,0 +1,28 @@
+name: Build Chrome extension zip
+
+on:
+  push:
+    tags: ['ext-v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read extension version
+        id: ver
+        run: echo "version=$(jq -r .version extension/manifest.json)" >> $GITHUB_OUTPUT
+
+      - name: Build zip
+        run: |
+          cd extension
+          bash package-extension.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-messenger-extension-${{ steps.ver.outputs.version }}
+          path: cc-messenger-extension-*.zip
+          if-no-files-found: error

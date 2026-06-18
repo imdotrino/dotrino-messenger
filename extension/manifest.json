@@ -1,0 +1,71 @@
+{
+  "manifest_version": 3,
+  "name": "Dotrino Messenger",
+  "short_name": "CC Messenger",
+  "version": "1.9.0",
+  "description": "End-to-end encrypted P2P messaging overlay on any page. Shares identity, contacts and threads with the Dotrino ecosystem.",
+  "homepage_url": "https://github.com/imdotrino/dotrino-messenger",
+  "author": "seyacat",
+  "icons": {
+    "16": "icons/icon-192.png",
+    "32": "icons/icon-192.png",
+    "48": "icons/icon-192.png",
+    "128": "icons/icon-192.png",
+    "192": "icons/icon-192.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_title": "Dotrino Messenger",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-192.png",
+      "32": "icons/icon-192.png",
+      "48": "icons/icon-192.png",
+      "128": "icons/icon-192.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "https://chromewebstore.google.com/*",
+        "https://chrome.google.com/webstore/*",
+        "https://messenger.dotrino.com/*"
+      ],
+      "js": ["identity-bridge-host.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://messenger.dotrino.com/*"],
+      "js": ["identity-bridge-host.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "permissions": [
+    "offscreen",
+    "notifications",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://messenger.dotrino.com/*",
+    "https://id.dotrino.com/*",
+    "https://store.dotrino.com/*",
+    "wss://proxy.dotrino.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["overlay.css", "icons/icon-192.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://messenger.dotrino.com https://id.dotrino.com https://store.dotrino.com;"
+  }
+}

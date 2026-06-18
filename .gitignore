@@ -1,0 +1,11 @@
+*.log
+.DS_Store
+.env.*.local
+.env.local
+.vite
+dist
+node_modules
+playwright-report/
+test-results/
+build
+.env
