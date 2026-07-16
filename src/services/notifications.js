@@ -10,7 +10,7 @@ import { getIdentity } from './identity'
 const CATEGORIES = [
   { key: 'contactMessages', label: { es: 'Mensajes de contactos', en: 'Contact messages' }, hint: { es: 'Avisar cuando un contacto te escribe.', en: 'Alert when a contact messages you.' } },
   { key: 'vouchedRequests', label: { es: 'Solicitudes avaladas', en: 'Vouched requests' }, hint: { es: 'Desconocidos avalados por tu red de confianza.', en: 'Strangers vouched by your trust network.' } },
-  { key: 'strangerRequests', label: { es: 'Solicitudes de desconocidos', en: 'Stranger requests' }, hint: { es: 'Sin aval de tu red. Apágalo si recibís spam.', en: 'No vouch from your network. Turn it off if you get spam.' } },
+  { key: 'strangerRequests', label: { es: 'Solicitudes de desconocidos', en: 'Stranger requests' }, hint: { es: 'Sin aval de tu red. Apágalo si recibes spam.', en: 'No vouch from your network. Turn it off if you get spam.' } },
   { key: 'helloRequests', label: { es: 'Cuando alguien te agrega', en: 'When someone adds you' }, hint: { es: 'Avisar al recibir un saludo, aunque no haya mensaje aún.', en: 'Alert on a new hello, even without a message yet.' } },
 ]
 

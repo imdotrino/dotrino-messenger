@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue'
+import { t } from '../i18n'
 
 const props = defineProps({
   // { id, fromNickname, text } | null
@@ -42,7 +43,7 @@ watch(() => props.dm, (next) => {
     aria-live="polite"
   >
     <div class="cc-incoming-card">
-      <div class="cc-incoming-from">{{ dm?.fromNickname || 'Mensaje nuevo' }}</div>
+      <div class="cc-incoming-from">{{ dm?.fromNickname || t.incoming.newMessage }}</div>
       <div class="cc-incoming-text">{{ dm?.text }}</div>
     </div>
   </div>

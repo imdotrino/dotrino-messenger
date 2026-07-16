@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { t } from '../i18n'
 const emit = defineEmits(['set'])
 const nick = ref('')
 const inputEl = ref(null)
@@ -17,43 +18,35 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
       <div class="brand">
         <div class="logo">CC</div>
         <h1>Dotrino</h1>
-        <p class="tagline">Mensajería P2P cifrada</p>
+        <p class="tagline">{{ t.welcome.tagline }}</p>
       </div>
 
-      <p class="welcome-msg">
-        Antes de empezar, dinos cómo te ven los demás.
-      </p>
+      <p class="welcome-msg">{{ t.welcome.intro }}</p>
 
       <label class="field">
-        <span class="label">Tu nickname</span>
+        <span class="label">{{ t.welcome.label }}</span>
         <input
           ref="inputEl"
           v-model="nick"
           @keyup.enter="submit"
-          placeholder="ej. alice_2024"
+          :placeholder="t.welcome.placeholder"
           maxlength="20"
         />
         <span class="counter">{{ nick.length }} / 20</span>
-        <span class="helper">
-          Podrás cambiarlo en cualquier momento. No es único —
-          tu identidad real es tu clave criptográfica.
-        </span>
+        <span class="helper">{{ t.welcome.helper }}</span>
       </label>
 
       <button class="btn primary-cta" :disabled="!valid(nick)" @click="submit">
-        Continuar
+        {{ t.welcome.submit }}
         <span class="arrow">→</span>
       </button>
 
       <div class="info">
         <span class="shield">⌬</span>
         <div>
-          <p>
-            Generaremos un par de llaves criptográficas (ECDSA + ECDH) en tu navegador.
-            Las claves privadas nunca salen de tu dispositivo.
-          </p>
+          <p>{{ t.welcome.info }}</p>
           <a class="link" href="https://github.com/imdotrino/dotrino-identity#readme" target="_blank" rel="noopener">
-            ¿Cómo funciona la identidad? →
+            {{ t.welcome.link }}
           </a>
         </div>
       </div>

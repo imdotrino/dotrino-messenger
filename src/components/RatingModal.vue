@@ -10,6 +10,7 @@ import { getIdentity } from '../services/identity'
 import { getReputation } from '../services/reputation'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
+import { lang } from '../i18n'
 
 // Perfil de OTRO peer (calificar). Mi propio perfil ya no pasa por aquí: lo abre
 // <dotrino-topbar> con su <dotrino-profile mode="self"> (§6.1).
@@ -56,10 +57,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- `:lang.attr` (no `:lang`): `lang` es propiedad nativa de HTMLElement, así que
+       Vue la asignaría como propiedad y el atributo nunca llegaría al componente
+       (mismo motivo que en el topbar). Sin esto la tarjeta de perfil salía en el
+       idioma del navegador, no en el de la app. -->
   <dotrino-profile
     ref="el"
     modal
     mode="edit"
+    :lang.attr="lang"
     :pubkey="pubkey"
     :name="name"
     :since="since || undefined"

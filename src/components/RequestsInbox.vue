@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useThreadsStore } from '../stores/threadsStore'
+import { t } from '../i18n'
 
 const threads = useThreadsStore()
 
@@ -16,21 +17,21 @@ const dismiss = (pk) => threads.dismissRequest(pk)
 
 <template>
   <div class="requests">
-    <div class="req-head">Solicitudes de contacto <span v-if="list.length" class="count">{{ list.length }}</span></div>
-    <p v-if="!list.length" class="req-empty">No tienes solicitudes pendientes.</p>
+    <div class="req-head">{{ t.requests.title }} <span v-if="list.length" class="count">{{ list.length }}</span></div>
+    <p v-if="!list.length" class="req-empty">{{ t.requests.empty }}</p>
     <ul v-else class="req-list">
       <li v-for="r in list" :key="r.pubkey" class="req" :class="{ vouched: r.vouched }">
         <div class="req-info">
           <div class="req-name">
             {{ r.nickname || short(r.pubkey) }}
-            <span v-if="r.vouched" class="vouch" title="Avalado por tu red de confianza">avalado por tu red</span>
-            <span v-else class="stranger" title="Desconocido, sin aval de tu red">desconocido</span>
+            <span v-if="r.vouched" class="vouch" :title="t.requests.vouchedTitle">{{ t.requests.vouched }}</span>
+            <span v-else class="stranger" :title="t.requests.strangerTitle">{{ t.requests.stranger }}</span>
           </div>
-          <div class="req-msg">{{ r.text || 'Quiere agregarte como contacto' }}</div>
+          <div class="req-msg">{{ r.text || t.requests.defaultMsg }}</div>
         </div>
         <div class="req-actions">
-          <button class="ok" @click="accept(r.pubkey)" title="Aceptar y agregar a contactos">✓</button>
-          <button class="no" @click="dismiss(r.pubkey)" title="Descartar">✕</button>
+          <button class="ok" @click="accept(r.pubkey)" :title="t.requests.accept">✓</button>
+          <button class="no" @click="dismiss(r.pubkey)" :title="t.requests.dismiss">✕</button>
         </div>
       </li>
     </ul>

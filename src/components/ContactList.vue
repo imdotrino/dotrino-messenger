@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
+import { t, locale } from '../i18n'
 
 const contacts = useContactsStore()
 const threads = useThreadsStore()
@@ -53,23 +54,25 @@ const avatarBg = (key) => {
   return palette[h % palette.length]
 }
 
+// El día ("lun"/"Mon") y el mes ("ene"/"Jan") son texto VISIBLE: van en el idioma
+// de la app, no en el del navegador (antes `[]` = locale del navegador).
 const fmtTime = (ts) => {
   if (!ts) return ''
   const d = new Date(ts)
   const now = new Date()
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
   const diffDays = Math.floor((now - d) / 86400000)
-  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'short' })
-  return d.toLocaleDateString([], { day: '2-digit', month: 'short' })
+  if (diffDays < 7) return d.toLocaleDateString(locale.value, { weekday: 'short' })
+  return d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short' })
 }
 </script>
 
 <template>
   <div class="list">
     <div v-if="items.length === 0" class="empty">
-      Aún no tienes contactos.<br>Pulsa <strong>+</strong> para añadir uno.
+      {{ t.list.emptyBefore }}<br>{{ t.list.emptyPress }} <strong>+</strong> {{ t.list.emptyAfter }}
     </div>
     <div
       v-for="c in items"
@@ -79,7 +82,7 @@ const fmtTime = (ts) => {
       :class="{ active: threads.activePubkey === c.publickey }"
       @click="emit('select', c.publickey)"
     >
-      <div class="avatar-wrap" @click.stop="emit('rate', c.publickey)" title="Calificar">
+      <div class="avatar-wrap" @click.stop="emit('rate', c.publickey)" :title="t.list.rate">
         <div class="avatar" :style="{ background: avatarBg(c.publickey) }">
           {{ initials(c.nickname) }}
         </div>
@@ -92,14 +95,14 @@ const fmtTime = (ts) => {
         </div>
         <div class="row2">
           <span class="snippet" v-if="c.lastText">{{ c.lastText }}</span>
-          <span class="snippet muted" v-else>Sin mensajes</span>
+          <span class="snippet muted" v-else>{{ t.list.noMessages }}</span>
           <span v-if="c.unread > 0" class="unread">{{ c.unread }}</span>
         </div>
         <div v-if="c.rating.value != null" class="row3">
           <span
             :class="['stars', c.rating.source]"
             @click.stop="emit('rate', c.publickey)"
-            :title="c.rating.source === 'mine' ? 'Tu calificación' : 'Calificación derivada (web of trust)'"
+            :title="c.rating.source === 'mine' ? t.list.ratingMine : t.list.ratingDerived"
           >{{ stars(c.rating.value) }}</span>
         </div>
       </div>

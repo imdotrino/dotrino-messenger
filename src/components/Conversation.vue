@@ -2,6 +2,7 @@
 import { ref, nextTick, watch, computed } from 'vue'
 import { useThreadsStore } from '../stores/threadsStore'
 import { useContactsStore } from '../stores/contactsStore'
+import { t, locale } from '../i18n'
 
 const threads = useThreadsStore()
 const contacts = useContactsStore()
@@ -35,14 +36,15 @@ const scrollDown = () => nextTick(() => {
 watch(() => threads.activeThread.length, scrollDown)
 watch(() => threads.activePubkey, scrollDown, { immediate: true })
 
-const fmtTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+// Los separadores de día son texto visible: siguen el idioma de la app.
+const fmtTime = (ts) => new Date(ts).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 const fmtDay = (ts) => {
   const d = new Date(ts)
   const now = new Date()
-  if (d.toDateString() === now.toDateString()) return 'Hoy'
+  if (d.toDateString() === now.toDateString()) return t.value.conv.today
   const yest = new Date(now); yest.setDate(now.getDate() - 1)
-  if (d.toDateString() === yest.toDateString()) return 'Ayer'
-  return d.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })
+  if (d.toDateString() === yest.toDateString()) return t.value.conv.yesterday
+  return d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 const initials = (s) => (s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase()
@@ -77,8 +79,8 @@ const grouped = computed(() => {
 <template>
   <div class="conv" v-if="c">
     <header class="head">
-      <button class="back" @click="emit('back')" title="Volver">←</button>
-      <div class="avatar-wrap" @click="emit('rate', c.publickey)" title="Calificar">
+      <button class="back" @click="emit('back')" :title="t.conv.back">←</button>
+      <div class="avatar-wrap" @click="emit('rate', c.publickey)" :title="t.conv.rate">
         <div class="avatar" :style="{ background: avatarBg(c.publickey) }">
           {{ initials(c.nickname) }}
         </div>
@@ -91,24 +93,24 @@ const grouped = computed(() => {
             v-if="rating.value != null"
             :class="['stars', rating.source]"
             @click="emit('rate', c.publickey)"
-            :title="rating.source === 'mine' ? 'Tu calificación' : 'Web of trust'"
+            :title="rating.source === 'mine' ? t.list.ratingMine : t.list.ratingDerived"
           >{{ stars(rating.value) }}</span>
         </div>
         <div class="sub">
           <span :class="['status-text', online ? 'on' : 'off']">
-            {{ online ? 'en línea' : 'offline · mensajes en cola' }}
+            {{ online ? t.conv.online : t.conv.offline }}
           </span>
           <code v-if="c.lastToken">{{ c.lastToken }}</code>
         </div>
       </div>
-      <button class="rate-btn" @click="emit('rate', c.publickey)" title="Calificar">★</button>
+      <button class="rate-btn" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
     </header>
 
     <div class="messages" ref="scroller">
       <div v-if="threads.activeThread.length === 0" class="empty">
         <div class="empty-content">
-          <p class="big">Aún no hay mensajes</p>
-          <p class="small">Saluda y empieza la conversación 👋</p>
+          <p class="big">{{ t.conv.emptyBig }}</p>
+          <p class="small">{{ t.conv.emptySmall }}</p>
         </div>
       </div>
       <template v-else>
@@ -130,15 +132,15 @@ const grouped = computed(() => {
     </div>
 
     <form class="composer" @submit.prevent="send">
-      <button type="button" class="clip" title="Adjuntar (próximamente)">📎</button>
+      <button type="button" class="clip" :title="t.conv.attach">📎</button>
       <textarea
         v-model="text"
         rows="1"
-        placeholder="Escribe un mensaje…"
+        :placeholder="t.conv.placeholder"
         data-testid="composer-input"
         @keydown.enter.exact.prevent="send"
       />
-      <button class="send" :disabled="!text.trim()" type="submit" title="Enviar">
+      <button class="send" :disabled="!text.trim()" type="submit" :title="t.conv.send">
         <span>➤</span>
       </button>
     </form>

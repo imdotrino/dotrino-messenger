@@ -21,8 +21,15 @@ import { getIdentity } from './services/identity'
 import { getReputation } from './services/reputation'
 import { isDisplayed, markDisplayed } from './services/displayedMessages'
 import { useBackLayer } from '@dotrino/nav/vue'
+import { t, lang, setLang } from './i18n'
 
 const booting = ref(true)
+
+// Idioma (§9): la fuente de verdad es el toggle ES/EN del <dotrino-topbar>, que lo
+// persiste en localStorage 'dotrino.lang'. Nosotros solo replicamos su elección en
+// el copy de la app (i18n.js arranca con el mismo criterio) y se la pasamos a los
+// componentes compartidos que aceptan `lang`.
+const onLangChange = (e) => setLang(e.detail?.lang)
 
 // El antiguo HelpTip ad-hoc (un solo coach-mark sobre el token) fue reemplazado
 // por el tutorial guiado compartido (@dotrino/tutorial); su
@@ -109,10 +116,10 @@ onMounted(async () => {
           // Aceptamos un placeholder derivado del pubkey para desbloquear la
           // UI; el usuario puede actualizar su nick en messenger.dotrino.com
           // directo y se propagará al overlay.
-          let derived = 'Yo'
+          let derived = t.value.fallbackNick
           try {
             const pk = JSON.parse(id.me.publickey)
-            derived = (pk?.x || '').slice(0, 6).toUpperCase() || 'Yo'
+            derived = (pk?.x || '').slice(0, 6).toUpperCase() || t.value.fallbackNick
           } catch (_) {}
           console.log('[cc-app] boot: overlay placeholder nickname →', derived)
           connection.setNickname(derived, { writeToVault: false })
@@ -238,7 +245,7 @@ const maybeStartTutorial = () => {
   if ((location.hash || '').replace(/^#/, '')) return
   if (!connection.nicknameSet) return
   startAppTutorial({
-    lang: () => 'es',
+    lang: () => lang.value,
     openAdd: (b) => { showAdd.value = b },
     setSidebarMobile: (b) => { showSidebarMobile.value = b },
     hasContact: () => contacts.contacts.length > 0,
@@ -249,21 +256,17 @@ const maybeStartTutorial = () => {
 
 <template>
   <!-- Boot: esperamos al getIdentity() inicial antes de decidir qué pintar. -->
-  <div v-if="booting" class="login-cta"><div class="login-card"><p>Cargando…</p></div></div>
+  <div v-if="booting" class="login-cta"><div class="login-card"><p>{{ t.boot.loading }}</p></div></div>
 
   <!-- Overlay sin identidad: no permitimos crear cuenta aquí (storage
        particionado por el site visitado). En su lugar, CTA al messenger real. -->
   <div v-else-if="!connection.nicknameSet && isReadOnlyEmbed" class="login-cta">
     <div class="login-card">
       <img class="login-logo" src="/icons/icon-192.png" alt="Dotrino" />
-      <h2>Inicia sesión</h2>
-      <p v-if="blockedByInsecureTop">
-        Esta página usa HTTP. El navegador desactiva las APIs criptográficas en iframes embebidos en sitios no seguros, así que el messenger no puede correr aquí. Ábrelo en su pestaña directa.
-      </p>
-      <p v-else>
-        Crea o entra a tu cuenta en messenger.dotrino.com. Tu identidad se sincroniza con la extensión automáticamente.
-      </p>
-      <button class="btn primary-cta" @click="openMessengerTab">Login</button>
+      <h2>{{ t.login.title }}</h2>
+      <p v-if="blockedByInsecureTop">{{ t.login.insecure }}</p>
+      <p v-else>{{ t.login.intro }}</p>
+      <button class="btn primary-cta" @click="openMessengerTab">{{ t.login.button }}</button>
     </div>
   </div>
 
@@ -273,35 +276,36 @@ const maybeStartTutorial = () => {
     <!-- Barra superior estándar del ecosistema (§5). Trae marca, volver, botón de
          perfil (§6.1) y la moneda de support (§6); nuestras acciones propias
          (instalar, chip de estado, campana) van por el slot "end".
-         `:lang.attr` (no `lang="es"`) a propósito: `lang` es propiedad estándar de
-         HTMLElement, así que Vue la asignaría como PROPIEDAD y el componente solo
-         tiene getter → la asignación se pierde y el atributo nunca llega. El topbar
-         entonces resolvería el idioma por navigator.language y pondría en inglés el
-         volver, la moneda y el perfil (y <html lang>) en una app solo en español.
-         El modificador .attr fuerza setAttribute. -->
+         El toggle ES/EN vive aquí (§9): el topbar lo pinta, lo persiste en
+         localStorage 'dotrino.lang' y nos avisa con 'dotrino-lang'.
+         `:lang.attr` (no `:lang`) a propósito: `lang` es propiedad estándar de
+         HTMLElement, así que Vue la asignaría como PROPIEDAD y el atributo nunca
+         llegaría; el topbar resolvería el idioma por navigator.language y podría
+         quedar en inglés (y <html lang>) con la app en español. El modificador
+         .attr fuerza setAttribute. -->
     <dotrino-topbar
       ref="topbarRef"
       class="topbar"
       brand="Dotrino"
       icon="/icons/icon-192.png"
       brand-href="./"
-      :lang.attr="'es'"
-      no-lang
+      :lang.attr="lang"
       :no-back="embedInIframe ? '' : null"
       profile
       support-href="https://ko-fi.com/dotrino"
       support-repo="imdotrino/dotrino-messenger"
       support-discord="https://discord.gg/D648uq7cth"
       @dotrino-profile="onProfileOpen"
+      @dotrino-lang="onLangChange"
     >
       <div class="status" slot="end">
-        <dotrino-install class="cc-install" lang="es"></dotrino-install>
+        <dotrino-install class="cc-install" :lang.attr="lang"></dotrino-install>
         <div class="me">
           <span :class="['dot', connection.isConnected ? 'on' : 'off']"></span>
           <span class="who">@{{ connection.nickname }}</span>
           <code class="tok" v-if="connection.token" data-testid="my-token">{{ connection.token }}</code>
         </div>
-        <button class="bell-btn" @click="showNotif = true" title="Notificaciones y solicitudes">
+        <button class="bell-btn" @click="showNotif = true" :title="t.topbar.bell">
           🔔
           <span v-if="requestCount" class="bell-badge">{{ requestCount }}</span>
         </button>
@@ -311,8 +315,8 @@ const maybeStartTutorial = () => {
     <main class="layout" :class="{ 'show-side': showSidebarMobile }">
       <aside class="sidebar">
         <div class="side-head">
-          <h3>Contactos</h3>
-          <button class="add-btn" @click="showAdd = true" title="Añadir contacto" data-testid="add-contact">+</button>
+          <h3>{{ t.sidebar.title }}</h3>
+          <button class="add-btn" @click="showAdd = true" :title="t.sidebar.add" data-testid="add-contact">+</button>
         </div>
         <RequestsInbox />
         <ContactList @select="onSelectContact" @rate="openRating" />
@@ -327,9 +331,8 @@ const maybeStartTutorial = () => {
         <div v-else class="empty">
           <div class="empty-card">
             <div class="empty-mark">CC</div>
-            <h4>Selecciona un contacto</h4>
-            <p>Para empezar una conversación, elige a alguien de la lista,
-               o pulsa <strong>+</strong> para añadir un nuevo contacto por token.</p>
+            <h4>{{ t.empty.title }}</h4>
+            <p>{{ t.empty.before }} <strong>+</strong> {{ t.empty.after }}</p>
           </div>
         </div>
       </section>
@@ -337,7 +340,7 @@ const maybeStartTutorial = () => {
 
     <AddContactModal v-if="showAdd" @close="showAdd = false" />
     <RatingModal v-if="ratingFor" :pubkey="ratingFor" @close="ratingFor = null" />
-    <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal @cc-notif-close="showNotif = false"></dotrino-notifications>
+    <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal :lang.attr="lang" @cc-notif-close="showNotif = false"></dotrino-notifications>
 
     <IncomingNotification :dm="incomingNotification" @done="onIncomingDone" />
   </div>

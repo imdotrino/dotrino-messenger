@@ -1,8 +1,9 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
+import { t } from '../i18n'
 
 const emit = defineEmits(['close'])
 const connection = useConnectionStore()
@@ -12,19 +13,22 @@ const threads = useThreadsStore()
 const tab = ref('add')   // 'add' | 'mine'
 const tokenInput = ref('')
 const nicknameInput = ref('')
-const error = ref('')
+// Guardamos la CLAVE del error, no el texto ya traducido: así el mensaje sigue al
+// idioma si el usuario cambia el toggle con el modal abierto.
+const errorKey = ref('')
+const errorText = computed(() => (errorKey.value ? t.value.add[errorKey.value] : ''))
 
 const myToken = () => connection.token
 
 const submit = async () => {
-  error.value = ''
+  errorKey.value = ''
   const tk = (tokenInput.value || '').trim().toUpperCase()
   if (!/^[A-Z0-9]{4,8}$/.test(tk)) {
-    error.value = 'Token inválido (4-8 caracteres alfanuméricos en mayúsculas).'
+    errorKey.value = 'errInvalid'
     return
   }
   if (tk === connection.token) {
-    error.value = 'Ese es tu propio token.'
+    errorKey.value = 'errOwn'
     return
   }
   try {
@@ -38,7 +42,10 @@ const submit = async () => {
     await threads.sendChallenge(tk)
     emit('close')
   } catch (e) {
-    error.value = e.message || 'Error enviando saludo'
+    // El mensaje crudo de la excepción es jerga técnica (§9.1) y no se puede
+    // traducir: al usuario le damos el texto llano y el detalle va a la consola.
+    console.warn('[cc-add-contact] sendHello failed', e)
+    errorKey.value = 'errSend'
   }
 }
 
@@ -58,70 +65,61 @@ const pasteToken = async () => {
   <div class="modal-backdrop" @click.self="emit('close')">
     <div class="modal">
       <header class="head">
-        <h2>Añadir contacto</h2>
-        <button class="x" @click="emit('close')" aria-label="Cerrar">×</button>
+        <h2>{{ t.add.title }}</h2>
+        <button class="x" @click="emit('close')" :aria-label="t.add.close">×</button>
       </header>
 
       <div class="body">
         <div class="tabs">
-          <button :class="['tab', tab === 'add'  && 'active']" @click="tab = 'add'">🔗 Por token</button>
-          <button :class="['tab', tab === 'mine' && 'active']" @click="tab = 'mine'" data-testid="share-my-token-tab">📤 Mi token</button>
+          <button :class="['tab', tab === 'add'  && 'active']" @click="tab = 'add'">{{ t.add.tabAdd }}</button>
+          <button :class="['tab', tab === 'mine' && 'active']" @click="tab = 'mine'" data-testid="share-my-token-tab">{{ t.add.tabMine }}</button>
         </div>
 
         <div v-if="tab === 'add'" class="tab-pane">
           <div class="info-card">
             <span class="info-icon">⌬</span>
-            <p>
-              Pega aquí el token que tu contacto te compartió. Verificaremos su clave
-              criptográfica al primer mensaje.
-            </p>
+            <p>{{ t.add.info }}</p>
           </div>
 
           <label class="field">
-            <span class="field-label">Token del contacto</span>
+            <span class="field-label">{{ t.add.fieldToken }}</span>
             <div class="token-input-wrap">
               <input
                 v-model="tokenInput"
-                placeholder="ej. A4F2"
+                :placeholder="t.add.phToken"
                 maxlength="8"
                 class="mono"
                 @keyup.enter="submit"
               />
-              <button type="button" class="paste-btn" @click="pasteToken" title="Pegar">📋</button>
+              <button type="button" class="paste-btn" @click="pasteToken" :title="t.add.paste">📋</button>
             </div>
           </label>
 
           <label class="field">
-            <span class="field-label">Apodo (opcional)</span>
-            <input v-model="nicknameInput" placeholder="ej. Bob de chess" maxlength="40" />
+            <span class="field-label">{{ t.add.fieldAlias }}</span>
+            <input v-model="nicknameInput" :placeholder="t.add.phAlias" maxlength="40" />
           </label>
 
-          <p v-if="error" class="error">{{ error }}</p>
-          <p class="hint">
-            Le enviaremos un saludo cifrado con tu identidad. Cuando responda, aparecerá
-            automáticamente en tu lista.
-          </p>
+          <p v-if="errorText" class="error">{{ errorText }}</p>
+          <p class="hint">{{ t.add.hint }}</p>
         </div>
 
         <div v-else class="tab-pane">
           <div class="info-card">
             <span class="info-icon">⤴</span>
-            <p>
-              Comparte este token con tu contacto. Cambia cada vez que te conectas, pero
-              tu identidad permanece.
-            </p>
+            <p>{{ t.add.mineInfo }}</p>
           </div>
           <div class="my-token">
             <code>{{ myToken() || '…' }}</code>
-            <button class="btn secondary" @click="copyToken" :disabled="!myToken()">Copiar</button>
+            <button class="btn secondary" @click="copyToken" :disabled="!myToken()">{{ t.add.copy }}</button>
           </div>
         </div>
       </div>
 
       <footer class="foot">
-        <button class="btn secondary" @click="emit('close')">Cancelar</button>
-        <button v-if="tab === 'add'" class="btn" @click="submit">Enviar saludo</button>
-        <button v-else class="btn" @click="emit('close')">Listo</button>
+        <button class="btn secondary" @click="emit('close')">{{ t.add.cancel }}</button>
+        <button v-if="tab === 'add'" class="btn" @click="submit">{{ t.add.send }}</button>
+        <button v-else class="btn" @click="emit('close')">{{ t.add.done }}</button>
       </footer>
     </div>
   </div>
