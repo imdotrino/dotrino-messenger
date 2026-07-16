@@ -15,15 +15,13 @@ export function startAppTutorial (ctx) {
 
   const showSide = async () => { ctx.setSidebarMobile(true); await sleep(300) }
 
-  // El paso 'profile' apunta a un elemento del SHADOW DOM del <dotrino-topbar>, y el
-  // chequeo de oclusión del paquete usa document.elementFromPoint(), que NO atraviesa
-  // shadow DOM: devuelve el HOST (<dotrino-topbar>), y host.contains(botón) es false
-  // para hijos del shadow → el botón se daría siempre por "tapado" y el paso se
-  // saltaría tras el timeout. Desactivamos ese chequeo (el resto de validaciones de
-  // visibilidad siguen activas). Creamos el elemento antes para que el atributo esté
-  // puesto cuando createTutorial llame a start().
+  // El paso 'profile' apunta a un elemento del SHADOW DOM del <dotrino-topbar>.
+  // Eso obligaba a apagar el chequeo de oclusión entero (no-occlusion-check),
+  // porque el paquete lo hacía con document.elementFromPoint(), que no atraviesa
+  // shadow DOM. Arreglado en @dotrino/tutorial 0.2.0 (deepElementFromPoint +
+  // composedContains), así que el chequeo vuelve a estar activo para TODOS los
+  // pasos, también los del light DOM.
   const el = document.createElement('dotrino-tutorial')
-  el.setAttribute('no-occlusion-check', '')
   document.body.appendChild(el)
 
   instance = createTutorial({
