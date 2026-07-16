@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed, watch, watchEffect } from 'vue'
 import { useConnectionStore } from './stores/connectionStore'
 import { useContactsStore } from './stores/contactsStore'
 import { useThreadsStore } from './stores/threadsStore'
@@ -12,8 +12,13 @@ import RatingModal from './components/RatingModal.vue'
 import { startAppTutorial } from './lib/tutorial'
 import IncomingNotification from './components/IncomingNotification.vue'
 import '@dotrino/notifications'
+// Barra superior estándar del ecosistema (§5): marca + volver + acciones +
+// perfil + moneda de support en UN componente. El messenger ya no re-arma el
+// header a mano ni fija la versión de support/profile: viajan dentro del topbar.
+import '@dotrino/topbar'
 import { getNotifications, notifSoundEnabled } from './services/notifications'
 import { getIdentity } from './services/identity'
+import { getReputation } from './services/reputation'
 import { isDisplayed, markDisplayed } from './services/displayedMessages'
 import { useBackLayer } from '@dotrino/nav/vue'
 
@@ -84,6 +89,9 @@ onMounted(async () => {
       const id = await getIdentity()
       console.log('[cc-app] boot id.me=', id?.me, 'connection.nickname=', connection.nickname)
       if (id) {
+        // Pilares para el botón/modal de perfil del topbar (§6.1).
+        identityInst.value = id
+        reputationInst.value = await getReputation()
         const vaultNick = id.me?.nickname
         const havePubkey = !!id.me?.publickey
         if (vaultNick && vaultNick !== connection.nickname) {
@@ -153,24 +161,52 @@ const onSelectContact = (pubkey) => {
 const backToList = () => { showSidebarMobile.value = true; threads.setActive(null) }
 const openRating = (pubkey) => { ratingFor.value = pubkey }
 
-// "Mi perfil": botón del header (a la izquierda de la moneda de soporte) que abre
-// el MISMO Web Component compartido en modo self con mi identidad del vault.
-const myProfilePk = ref(null)
-const openMyProfile = async () => {
-  try {
-    const id = await getIdentity()
-    const pk = id?.me?.publickey
-    if (pk) myProfilePk.value = pk
-  } catch (_) { /* sin identidad no abre */ }
+/* ----- Topbar estándar (§5) + "Mi perfil" (§6.1) -----
+ * El topbar es DUEÑO del modal "Mi perfil": le pasamos los pilares que la app ya
+ * maneja (identity + reputation) por propiedad JS y él abre <dotrino-profile
+ * mode="self"> solo, con el avatar del perfil activo en el botón. */
+const topbarRef = ref(null)
+const identityInst = ref(null)
+const reputationInst = ref(null)
+
+// Tema del modal de perfil (vars --ccp-*), acorde al claro "Warm Sand" del messenger.
+const profileTheme = {
+  '--ccp-bg': '#faf3e7', '--ccp-bg-2': '#f5ede0', '--ccp-bg-3': '#ede2cf', '--ccp-bg-4': '#e0d3ba',
+  '--ccp-border': '#d4c4a8', '--ccp-text': '#2b211a', '--ccp-muted': '#8a7a66',
+  '--ccp-accent': '#c0392b', '--ccp-accent-2': '#a93226', '--ccp-accent-text': '#ffffff',
+  '--ccp-gold': '#d4a72c', '--ccp-derived': '#a37a45',
+  '--ccp-online': '#5a8a3a', '--ccp-affinity': '#a37a45', '--ccp-input-bg': '#ffffff',
+  '--ccp-radius': '12px',
+  '--ccp-font': '"Inter", system-ui, sans-serif',
+  '--ccp-font-headline': '"Space Grotesk", system-ui, sans-serif',
+  '--ccp-font-mono': '"JetBrains Mono", ui-monospace, monospace',
+}
+
+watchEffect(() => {
+  const tb = topbarRef.value
+  if (!tb) return
+  tb.identity = identityInst.value ?? null
+  tb.reputation = reputationInst.value ?? null
+  tb.profileTheme = profileTheme
+})
+
+// Al pulsar "Mi perfil" refrescamos igual que hacía el modal propio: pedimos a los
+// contactos sus calificaciones sobre mí (protocolo del messenger) y recargamos
+// peers. NO cancelamos el evento: el modal lo abre el topbar.
+const onProfileOpen = () => {
+  const pk = identityInst.value?.me?.publickey
+  if (!pk) return
+  contacts.refreshPeers()
+  threads.askRatingsAbout(pk)
 }
 
 // Volver unificado (@dotrino/nav): el botón físico de Android /
 // gesto de iOS / atrás del navegador / chevron del header cierra el modal abierto
 // o la conversación activa (vuelve a la lista) antes de salir hacia dotrino.com.
+// (El modal "Mi perfil" ya lo integra el propio topbar con el mismo controlador.)
 useBackLayer(showAdd)
 useBackLayer(showNotif)
 useBackLayer(ratingFor, { onClose: () => { ratingFor.value = null } })
-useBackLayer(myProfilePk, { onClose: () => { myProfilePk.value = null } })
 // La conversación abierta es una "vista": volver regresa a la lista de contactos.
 const convoOpen = computed(() => !!threads.activePubkey)
 useBackLayer(convoOpen, { onClose: backToList })
@@ -181,6 +217,10 @@ useBackLayer(convoOpen, { onClose: backToList })
 // (top-level real, unpartitioned) y la extensión propaga el blob al overlay.
 const embed = new URLSearchParams(location.search).get('embed')
 const isReadOnlyEmbed = embed === 'overlay'
+// Embebidos en un iframe de la extensión: main.js NO instala el controlador de
+// "volver" a propósito (ahí no manejamos el history del padre). Le pasamos
+// `no-back` al topbar para que tampoco lo instale él (lo hace si falta).
+const embedInIframe = !!embed && window !== window.top
 // Si la página padre es HTTP, el iframe HTTPS queda non-secure-context y
 // `crypto.subtle` no existe — la vault no puede arrancar, así que ni siquiera
 // intentamos. CTA inmediato.
@@ -230,13 +270,31 @@ const maybeStartTutorial = () => {
   <NicknameModal v-else-if="!connection.nicknameSet" @set="handleNicknameSet" />
 
   <div v-else class="app">
-    <header class="topbar">
-      <dotrino-back class="cc-back" lang="es"></dotrino-back>
-      <div class="brand">
-        <img class="logo" src="/icons/icon-192.png" alt="Dotrino" />
-        <span class="brand-name">Dotrino</span>
-      </div>
-      <div class="status">
+    <!-- Barra superior estándar del ecosistema (§5). Trae marca, volver, botón de
+         perfil (§6.1) y la moneda de support (§6); nuestras acciones propias
+         (instalar, chip de estado, campana) van por el slot "end".
+         `:lang.attr` (no `lang="es"`) a propósito: `lang` es propiedad estándar de
+         HTMLElement, así que Vue la asignaría como PROPIEDAD y el componente solo
+         tiene getter → la asignación se pierde y el atributo nunca llega. El topbar
+         entonces resolvería el idioma por navigator.language y pondría en inglés el
+         volver, la moneda y el perfil (y <html lang>) en una app solo en español.
+         El modificador .attr fuerza setAttribute. -->
+    <dotrino-topbar
+      ref="topbarRef"
+      class="topbar"
+      brand="Dotrino"
+      icon="/icons/icon-192.png"
+      brand-href="./"
+      :lang.attr="'es'"
+      no-lang
+      :no-back="embedInIframe ? '' : null"
+      profile
+      support-href="https://ko-fi.com/dotrino"
+      support-repo="imdotrino/dotrino-messenger"
+      support-discord="https://discord.gg/D648uq7cth"
+      @dotrino-profile="onProfileOpen"
+    >
+      <div class="status" slot="end">
         <dotrino-install class="cc-install" lang="es"></dotrino-install>
         <div class="me">
           <span :class="['dot', connection.isConnected ? 'on' : 'off']"></span>
@@ -247,19 +305,8 @@ const maybeStartTutorial = () => {
           🔔
           <span v-if="requestCount" class="bell-badge">{{ requestCount }}</span>
         </button>
-        <button class="profile-btn" data-testid="my-profile" @click="openMyProfile" title="Mi perfil" aria-label="Mi perfil">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
-          </svg>
-        </button>
-        <dotrino-support
-          class="topbar-coin"
-          href="https://ko-fi.com/dotrino"
-          repo="imdotrino/dotrino-messenger"
-          discord="https://discord.gg/D648uq7cth"
-        ></dotrino-support>
       </div>
-    </header>
+    </dotrino-topbar>
 
     <main class="layout" :class="{ 'show-side': showSidebarMobile }">
       <aside class="sidebar">
@@ -290,7 +337,6 @@ const maybeStartTutorial = () => {
 
     <AddContactModal v-if="showAdd" @close="showAdd = false" />
     <RatingModal v-if="ratingFor" :pubkey="ratingFor" @close="ratingFor = null" />
-    <RatingModal v-if="myProfilePk" :pubkey="myProfilePk" self @close="myProfilePk = null" />
     <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal @cc-notif-close="showNotif = false"></dotrino-notifications>
 
     <IncomingNotification :dm="incomingNotification" @done="onIncomingDone" />
@@ -326,28 +372,25 @@ const maybeStartTutorial = () => {
 .login-card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .login-card .btn { width: 100%; }
 
+/* Topbar estándar (@dotrino/topbar): solo lo tematizamos con los tokens
+   "Warm Sand" de la app; el layout, la marca, el volver, el perfil y la moneda
+   los pone el componente. */
 .topbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 20px;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-/* Chevron de volver (Web Component @dotrino/nav). */
-.cc-back { color: var(--text, currentColor); --cc-back-size: 38px; margin-left: -6px; }
-.brand { display: flex; align-items: center; gap: 12px; }
-.status { margin-left: auto; }
-.logo {
-  width: 36px; height: 36px;
-  object-fit: contain;
   display: block;
+  flex-shrink: 0;
+  --dotrino-topbar-bg: var(--bg-2);
+  --dotrino-topbar-border: var(--border);
+  --dotrino-topbar-text: var(--text);
+  --dotrino-topbar-muted: var(--muted);
+  --dotrino-topbar-accent: var(--accent);
+  --dotrino-topbar-accent-text: var(--on-accent);
+  --dotrino-topbar-pad: 12px 20px;
+  --dotrino-topbar-font: var(--font-body);
 }
-.brand-name {
-  font-family: var(--font-headline);
-  font-weight: 600;
-  font-size: 17px;
-  color: var(--text);
-}
+.topbar::part(brand-icon) { width: 36px; height: 36px; border-radius: 0; object-fit: contain; }
+.topbar::part(brand-name) { font-family: var(--font-headline); font-weight: 600; font-size: 17px; }
+/* Botón de perfil: mismo ghost circular que el resto de controles de la barra. */
+.topbar::part(profile) { background: var(--bg-4); border-color: var(--border); color: var(--text); }
 
 .status { display: flex; gap: 12px; align-items: center; }
 
@@ -388,19 +431,6 @@ const maybeStartTutorial = () => {
   font-weight: 500;
   transition: background 150ms ease-out;
 }
-
-/* "Mi perfil": botón circular ghost a la izquierda de la moneda de soporte. */
-.profile-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; padding: 0; flex-shrink: 0;
-  border-radius: 50%; background: var(--bg-4); color: var(--text);
-  border: 1px solid var(--border); cursor: pointer;
-  transition: transform 150ms ease-out, border-color 150ms ease-out;
-}
-.profile-btn svg { width: 19px; height: 19px; display: block; }
-.profile-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
-
-.topbar-coin { display: inline-flex; align-items: center; }
 
 .bell-btn {
   position: relative;
@@ -501,8 +531,8 @@ const maybeStartTutorial = () => {
   .layout .main-pane { display: flex; }
   .layout.show-side .sidebar  { display: flex; }
   .layout.show-side .main-pane { display: none; }
-  .topbar { padding: 10px 14px; }
-  .brand-name { display: none; }
+  .topbar { --dotrino-topbar-pad: 10px 14px; }
+  .topbar::part(brand-name) { display: none; }
   .me { padding: 4px 8px; gap: 6px; font-size: 12px; }
   .me .tok { font-size: 11px; padding: 2px 6px; }
 }

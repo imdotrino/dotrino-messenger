@@ -48,11 +48,11 @@ html.cc-embed, html.cc-embed body, html.cc-embed #app { height: 100%; min-height
    recorte invisible. La conversación en sí mantiene su propio scroll
    interno por .messages. */
 html.cc-embed .app { height: 100%; overflow-y: auto; overflow-x: hidden; }
-html.cc-embed .topbar { padding: 8px 12px; }
-html.cc-embed .topbar .brand-name { display: none; }
-html.cc-embed .topbar .logo { width: 28px; height: 28px; }
-html.cc-embed .topbar .me-avatar { width: 30px; height: 30px; }
-html.cc-embed .topbar .install-btn { display: none; }
+/* La marca y el icono viven en el shadow del <dotrino-topbar>: se compactan por
+   sus `part`s y su variable de padding, no por selectores de descendencia. */
+html.cc-embed .topbar { --dotrino-topbar-pad: 8px 12px; }
+html.cc-embed .topbar::part(brand-name) { display: none; }
+html.cc-embed .topbar::part(brand-icon) { width: 28px; height: 28px; }
 html.cc-embed .topbar .me { padding: 4px 8px; font-size: 12px; }
 html.cc-embed .topbar .me .tok { font-size: 11px; padding: 2px 6px; }
 html.cc-embed .side-head { padding: 10px 14px; }

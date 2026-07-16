@@ -11,10 +11,10 @@ import { getReputation } from '../services/reputation'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
 
+// Perfil de OTRO peer (calificar). Mi propio perfil ya no pasa por aquí: lo abre
+// <dotrino-topbar> con su <dotrino-profile mode="self"> (§6.1).
 const props = defineProps({
-  pubkey: { type: String, required: true },
-  // `self` = mi propio perfil (modo self, sin calificar); por defecto califica a otro.
-  self: { type: Boolean, default: false }
+  pubkey: { type: String, required: true }
 })
 const emit  = defineEmits(['close'])
 
@@ -59,7 +59,7 @@ onBeforeUnmount(() => {
   <dotrino-profile
     ref="el"
     modal
-    :mode="self ? 'self' : 'edit'"
+    mode="edit"
     :pubkey="pubkey"
     :name="name"
     :since="since || undefined"

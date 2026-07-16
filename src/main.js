@@ -3,7 +3,8 @@ import { createPinia } from 'pinia'
 import { registerSW } from 'virtual:pwa-register'
 import './style.css'
 import App from './App.vue'
-import '@dotrino/support'
+// <dotrino-support> ya NO se importa aquí: lo trae <dotrino-topbar> (§5), que es
+// el dueño de la moneda. Así la app no fija su versión.
 import '@dotrino/install'
 import '@dotrino/tutorial'
 import { createBackNav } from '@dotrino/nav'
