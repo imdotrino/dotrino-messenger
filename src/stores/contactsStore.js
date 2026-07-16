@@ -124,10 +124,9 @@ export const useContactsStore = defineStore('contacts', () => {
     try {
       const rep = await getReputation()
       if (!rep) return {}
-      const me = connection.myPublickey
-      const { attestations } = await rep.getRatings(pubkey)
-      const mine = attestations.find(a => a.issuer === me)
-      return (mine && mine.indicators) || {}
+      // El registro guarda una atestación por eje; el paquete las fusiona (leer
+      // solo la primera devolvía un único eje, así que la afinidad se perdía).
+      return await rep.myIndicatorsFor(pubkey)
     } catch (_) { return {} }
   }
 
