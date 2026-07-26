@@ -218,8 +218,11 @@ export const useThreadsStore = defineStore('threads', () => {
       // identificador estable: usamos la pubkey del destinatario para que
       // sea el mismo valor al cifrar y al descifrar (vault.decrypt usa
       // myToken como key del wrap).
+      // `publickey` es lo que permite al vault expandir el sobre a TODOS los dispositivos
+      // de esa persona (si conocemos su tarjeta). `token` se mantiene por compatibilidad
+      // del sobre v1; el v2 se indexa por llave, no por conexión.
       const envelope = await id.encrypt(
-        [{ token: pubkey, encryptionPubkey: contact.encryptionPubkey }],
+        [{ publickey: pubkey, token: pubkey, encryptionPubkey: contact.encryptionPubkey }],
         trimmed
       )
       const msg = formatMessage('DM_ENC', { envelope, ts: entry.ts, mid: entry.id })
@@ -247,7 +250,7 @@ export const useThreadsStore = defineStore('threads', () => {
         const id = await getIdentity()
         if (!id) { remaining.push(item); continue }
         const envelope = await id.encrypt(
-          [{ token: item.pubkey, encryptionPubkey: c.encryptionPubkey }],
+          [{ publickey: item.pubkey, token: item.pubkey, encryptionPubkey: c.encryptionPubkey }],
           item.text
         )
         const msg = formatMessage('DM_ENC', { envelope, ts: Date.now(), mid: item.entryId })
@@ -308,9 +311,14 @@ export const useThreadsStore = defineStore('threads', () => {
     const pubkey = id.me?.publickey
     if (!pubkey) return null
     const encryptionPubkey = await id.getEncryptionPubkey()
+    // TARJETA DE PERFIL: lo mínimo para que el otro pueda cifrarnos a TODOS nuestros
+    // dispositivos y no solo a este (perfil, versión y llaves de cifrado; sin etiquetas
+    // ni permisos). Ver dotrino-vault/docs/acta-de-perfil.md.
+    const card = await id.profileCard?.().catch(() => null)
     return formatMessage('HELLO', {
       nickname: connection.nickname,
-      pubkey, encryptionPubkey
+      pubkey, encryptionPubkey,
+      ...(card ? { card } : {})
     })
   }
 
@@ -362,6 +370,18 @@ export const useThreadsStore = defineStore('threads', () => {
 
   const handleHello = async (fromToken, payload) => {
     if (!payload?.pubkey) return
+    // Su tarjeta de perfil, si la manda: con ella podremos cifrarle a todos sus
+    // dispositivos. El vault la verifica y no acepta retrocesos ni cambios de master
+    // en silencio; si la rechaza, seguimos como siempre (cifrando solo a este aparato).
+    if (payload.card) {
+      try {
+        const id = await getIdentity()
+        const r = await id?.adoptPeerCard?.(payload.card)
+        if (r && !r.adopted && r.reason === 'master-cambiado') {
+          console.warn('[messenger] la tarjeta de %s la firma otro dispositivo: no se adopta sola', payload.pubkey.slice(0, 24))
+        }
+      } catch (e) { console.warn('adoptPeerCard:', e?.message || e) }
+    }
     // If this pubkey is already a contact, refresh its presence + encryption key.
     const existing = contacts.findByPubkey(payload.pubkey)
     // Importante: hay que AWAIT antes de mandar el HELLO de vuelta. Si no,
@@ -420,7 +440,8 @@ export const useThreadsStore = defineStore('threads', () => {
     if (!id || !payload?.nonce) return
     try {
       const response = await id.signChallenge(payload.nonce)
-      const msg = formatMessage('IDENTIFY_RESPONSE', response)
+      const card = await id.profileCard?.().catch(() => null)
+      const msg = formatMessage('IDENTIFY_RESPONSE', { ...response, ...(card ? { card } : {}) })
       await connection.sendMessage([fromToken], msg)
       // also send a HELLO so they learn nickname
       sendHello(fromToken)
@@ -433,6 +454,7 @@ export const useThreadsStore = defineStore('threads', () => {
     try {
       const result = await id.verifyResponse(payload)
       if (!result.ok) return
+      if (payload.card) { try { await id.adoptPeerCard?.(payload.card) } catch (_) {} }
       const pubkey = result.publickey
       const encryptionPubkey = result.encryptionPubkey || payload.encryptionPubkey || null
       // Promote to contact (or refresh if already there). Si lo agregamos por
