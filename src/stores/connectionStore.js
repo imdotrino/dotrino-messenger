@@ -85,6 +85,9 @@ export const useConnectionStore = defineStore('connection', () => {
       const assigned = await wsProxyClient.connect()
       if (assigned && !token.value) token.value = assigned
       isConnected.value = true
+      // La cita es lo que se le enseña a otra persona; se pide al conectar y se
+      // renueva sola antes de caducar.
+      refreshPairingCode().catch(() => {})
       // Identificarse con la pubkey del vault para activar la cola offline.
       identifyWithVault().catch(e => console.warn('identify failed:', e))
     } catch (e) {
@@ -228,6 +231,33 @@ export const useConnectionStore = defineStore('connection', () => {
     ? (toPubkeys, raw) => relayProxyCall('sendByPubkey', [toPubkeys, raw])
     : (toPubkeys, raw) => wsProxyClient.sendByPubkey(toPubkeys, raw)
 
+  // ── El código corto que se comparte ("pásame tu pin") ──────────────────
+  //
+  // El identificador de la conexión dejó de ser un código de 4 caracteres: hoy
+  // es una INSTANCIA larga (id de proxio + 22 al azar) que no se puede dictar ni
+  // teclear. Lo que se comparte es una CITA: 6 caracteres que caducan en minutos
+  // y resuelven a la conexión de su dueño, en el proxio que sea.
+  const pairingCode = ref(null)
+  let pairingTimer = null
+
+  const refreshPairingCode = async () => {
+    if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = null }
+    if (IS_RELAY_MODE) return
+    try {
+      const res = await wsProxyClient.requestPairingCode()
+      pairingCode.value = res?.code || null
+      const left = (res?.expiresAt || 0) - Date.now()
+      if (left > 10000) pairingTimer = setTimeout(refreshPairingCode, left - 5000)
+    } catch (_) { pairingCode.value = null }
+  }
+
+  /** Canjea la cita de otra persona. Devuelve {ok, instance, publickey, error}. */
+  const redeemPairingCode = async (code) => {
+    if (IS_RELAY_MODE) return { ok: false, error: 'no disponible en este modo' }
+    try { return await wsProxyClient.redeemPairingCode(code) }
+    catch (e) { return { ok: false, error: e?.message || 'no se pudo canjear' } }
+  }
+
   // Solo el offscreen procesa la cola.
   let queueWatcher = null
   if (IS_OFFSCREEN) {
@@ -281,7 +311,8 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   return {
-    token, isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
+    token, pairingCode, refreshPairingCode, redeemPairingCode,
+    isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
     myPublickey, queuedDelivered,
     connect, disconnect, sendMessage, sendByPubkey, setNickname, setPresenceChannel, wsProxyClient,
     KNOWN_PROXIES, setProxyUrl,

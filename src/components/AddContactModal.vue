@@ -18,19 +18,39 @@ const nicknameInput = ref('')
 const errorKey = ref('')
 const errorText = computed(() => (errorKey.value ? t.value.add[errorKey.value] : ''))
 
-const myToken = () => connection.token
+// Lo que se muestra y se comparte es la CITA, no la instancia: la instancia es
+// el identificador interno de la conexión (34 caracteres, sensible a mayúsculas)
+// y no hay forma de dictarla ni de teclearla.
+const myToken = () => connection.pairingCode
+
+// Mismo criterio que el proxio: se traduce lo que se confunde al leer o al
+// dictar. Solo se traduce lo que NUNCA se emite, para no romper un código bueno.
+const CONFUSABLES = { I: '1', L: '1', S: '5', Z: '2', B: '8', G: '6', 0: 'O' }
+const normalizar = (raw) => [...String(raw || '').toUpperCase()]
+  .filter((c) => c !== ' ' && c !== '-' && c !== '_')
+  .map((c) => CONFUSABLES[c] ?? c)
+  .join('')
 
 const submit = async () => {
   errorKey.value = ''
-  const tk = (tokenInput.value || '').trim().toUpperCase()
-  if (!/^[A-Z0-9]{4,8}$/.test(tk)) {
+  const code = normalizar(tokenInput.value)
+  if (!/^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$/.test(code)) {
     errorKey.value = 'errInvalid'
     return
   }
-  if (tk === connection.token) {
+  if (code === connection.pairingCode) {
     errorKey.value = 'errOwn'
     return
   }
+  // Canjear la cita da la instancia de esa persona (esté en el proxio que esté).
+  // Antes se usaba el texto tecleado como si fuera la dirección: eso dejó de
+  // funcionar cuando la dirección pasó a ser la instancia.
+  const res = await connection.redeemPairingCode(code)
+  if (!res?.ok || !res.instance) {
+    errorKey.value = 'errInvalid'
+    return
+  }
+  const tk = res.instance
   try {
     // Recordamos el apodo elegido para aplicarlo cuando el peer responda al
     // handshake y se promueva a contacto (antes el campo se ignoraba).
