@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "playwright test"
+    "test": "playwright test",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@dotrino/identity": "0.33.0",
@@ -27,6 +28,7 @@
     "@playwright/test": "^1.59.1",
     "@vitejs/plugin-vue": "^6.0.2",
     "vite": "^7.3.1",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "typescript": "5.9.3"
   }
 }
