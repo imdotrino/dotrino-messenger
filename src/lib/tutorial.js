@@ -1,7 +1,7 @@
 // Tutorial guiado del Messenger (burbujas tipo donar/compartir) con el paquete
 // compartido @dotrino/tutorial. Explica tu IDENTIDAD/perfil, tu
-// TOKEN de conexión (para que te agreguen), cómo AÑADIR un contacto, cómo
-// COMPARTIR tu token y cómo CONVERSAR. La app no tiene menú burger: en móvil la
+// CÓDIGO de emparejamiento (para que te agreguen), cómo AÑADIR un contacto, cómo
+// COMPARTIR tu código y cómo CONVERSAR. La app no tiene menú burger: en móvil la
 // barra de contactos se muestra con setSidebarMobile(true). Los pasos que
 // requieren contactos/conversación se gatean con skipIf y aparecen cuando existen.
 import { createTutorial } from '@dotrino/tutorial'
@@ -47,11 +47,11 @@ export function startAppTutorial (ctx) {
       },
       {
         id: 'token', order: 2, placement: 'bottom',
-        target: '[data-testid="my-token"]',
-        title: { es: 'Tu token', en: 'Your token' },
+        target: '[data-testid="my-code"]',
+        title: { es: 'Tu código', en: 'Your code' },
         text: {
-          es: 'Este es tu token de conexión: compártelo para que otros te agreguen como contacto. Cambia cada vez que te conectas, pero tu identidad (tu clave) sigue siendo la misma.',
-          en: 'This is your connection token: share it so others can add you as a contact. It changes each time you connect, but your identity (your key) stays the same.',
+          es: 'Este es tu código para que te agreguen: 6 caracteres que puedes dictar por teléfono. Tócalo para copiarlo. Vale para una sola persona y caduca a los pocos minutos; se renueva solo.',
+          en: 'This is your code for people to add you: 6 characters you can read out over the phone. Tap it to copy. It works for one person only and expires after a few minutes; it renews itself.',
         },
       },
       {
@@ -60,18 +60,18 @@ export function startAppTutorial (ctx) {
         before: showSide,
         title: { es: 'Agregar un contacto', en: 'Add a contact' },
         text: {
-          es: 'Con este botón + agregas un contacto: pega el token que te compartieron y le enviamos un saludo cifrado. Cuando responda, aparece en tu lista.',
-          en: 'This + button adds a contact: paste the token you were given and we send an encrypted hello. When they reply, they appear in your list.',
+          es: 'Con este botón + agregas un contacto: escribe su código de 6 caracteres o escanea su QR, y le enviamos un saludo cifrado. Cuando responda, aparece en tu lista.',
+          en: 'This + button adds a contact: type their 6-character code or scan their QR, and we send an encrypted hello. When they reply, they appear in your list.',
         },
       },
       {
         id: 'share', order: 4, placement: 'bottom',
         target: '[data-testid="share-my-token-tab"]',
         before: async () => { ctx.openAdd(true); await sleep(300) },
-        title: { es: 'Compartir tu token', en: 'Share your token' },
+        title: { es: 'Compartir tu código', en: 'Share your code' },
         text: {
-          es: 'Aquí compartes TU token: abre "Mi token" y cópialo para enviárselo a quien quieras que te agregue. Así te encuentran y te escriben.',
-          en: 'Here you share YOUR token: open "My token" and copy it to send to whoever you want to add you. That is how they find and message you.',
+          es: 'Aquí compartes TU código: abre "Mi código" y enséñale el QR a quien tengas al lado, o cópialo para mandárselo. Así te encuentran y te escriben.',
+          en: 'Here you share YOUR code: open "My code" and show the QR to whoever is next to you, or copy it and send it. That is how they find and message you.',
         },
       },
       {

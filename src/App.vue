@@ -39,8 +39,55 @@ const connection = useConnectionStore()
 const contacts = useContactsStore()
 const threads = useThreadsStore()
 const showAdd = ref(false)
+// Enlace entrante `#add=CÓDIGO`: es el QR de otra persona, escaneado con la cámara
+// del sistema en vez de con la de la app. Se lee ANTES de tocar el hash (el
+// tutorial mira si la visita venía limpia) y se limpia la barra en cuanto se usa,
+// para que recargar no vuelva a disparar el mismo emparejamiento con un código ya
+// quemado. El código va en el #fragment, que nunca llega al servidor.
+const leerCodigoEntrante = () => {
+  const m = (location.hash || '').match(/[#&]add=([^&]+)/i)
+  return m ? decodeURIComponent(m[1]).toUpperCase().slice(0, 8) : ''
+}
+let incomingCode = leerCodigoEntrante()
+const pendingCode = ref('')
+/**
+ * Abre "añadir contacto" con el código del enlace ya escrito. Se llama en los dos
+ * caminos por los que se llega a tener cuenta: la visita normal y la de quien
+ * acaba de crearse el apodo — al recién llegado es a quien MÁS le duele perder el
+ * código con el que venía.
+ */
+const usarCodigoEntrante = () => {
+  const code = incomingCode || leerCodigoEntrante()
+  if (!code) return
+  incomingCode = ''
+  pendingCode.value = code
+  showAdd.value = true
+  try { history.replaceState(null, '', location.pathname + location.search) } catch (_) {}
+}
+// La app ya abierta también recibe enlaces: el manifiesto pide `focus-existing`, y
+// en Android el enlace del QR cae en la ventana que ya está corriendo. Sin esto,
+// ahí no pasaba nada — la dirección cambiaba y la app ni se enteraba.
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    if (connection.nicknameSet) usarCodigoEntrante()
+  })
+}
 const showNotif = ref(false)
 const ratingFor = ref(null)
+
+// Lo que se enseña acá es el CÓDIGO de emparejamiento (6 caracteres, un solo uso,
+// caduca a los minutos y se renueva solo). NO la instancia: son 34 caracteres, es
+// la dirección de ruteo del proxio y no hay forma de dictarla. Tocarlo lo copia.
+const codeCopied = ref(false)
+let codeCopiedTimer = null
+const copyMyCode = async () => {
+  const code = connection.pairingCode
+  if (!code) return
+  try { await navigator.clipboard.writeText(code) } catch { return }
+  codeCopied.value = true
+  clearTimeout(codeCopiedTimer)
+  codeCopiedTimer = setTimeout(() => { codeCopied.value = false }, 1500)
+}
 
 // Panel de notificaciones = Web Component compartido <dotrino-notifications>.
 const bindNotif = (el) => { if (el) el.controller = getNotifications() }
@@ -141,6 +188,8 @@ onMounted(async () => {
     await contacts.refreshPeers()
   }
   maybeStartTutorial()
+  // Después del tutorial (que se salta solo cuando hay enlace entrante).
+  if (connection.nicknameSet) usarCodigoEntrante()
 })
 
 // Avisamos a todos los contactos por pubkey: si están conectados el proxy
@@ -158,6 +207,7 @@ const handleNicknameSet = async (nick) => {
   await contacts.refreshPeers()
   setTimeout(announceToKnown, 500)
   maybeStartTutorial()
+  usarCodigoEntrante()
 }
 
 const onSelectContact = (pubkey) => {
@@ -303,9 +353,15 @@ const maybeStartTutorial = () => {
         <div class="me">
           <span :class="['dot', connection.isConnected ? 'on' : 'off']"></span>
           <span class="who">@{{ connection.nickname }}</span>
-          <code class="tok" v-if="connection.token" data-testid="my-token">{{ connection.token }}</code>
+          <button
+            v-if="connection.pairingCode"
+            class="tok"
+            data-testid="my-code"
+            :title="t.topbar.copyCode"
+            @click="copyMyCode"
+          >{{ codeCopied ? t.topbar.copied : connection.pairingCode }}</button>
         </div>
-        <button class="bell-btn" @click="showNotif = true" :title="t.topbar.bell">
+        <button class="bell-btn" data-testid="bell" @click="showNotif = true" :title="t.topbar.bell">
           🔔
           <span v-if="requestCount" class="bell-badge">{{ requestCount }}</span>
         </button>
@@ -338,7 +394,7 @@ const maybeStartTutorial = () => {
       </section>
     </main>
 
-    <AddContactModal v-if="showAdd" @close="showAdd = false" />
+    <AddContactModal v-if="showAdd" :code="pendingCode" @close="showAdd = false; pendingCode = ''" />
     <RatingModal v-if="ratingFor" :pubkey="ratingFor" @close="ratingFor = null" />
     <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal :lang.attr="lang" @cc-notif-close="showNotif = false"></dotrino-notifications>
 
@@ -414,9 +470,12 @@ const maybeStartTutorial = () => {
   border-radius: 6px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--muted);
+  letter-spacing: 1px;
+  color: var(--text);
   border: 1px solid var(--border);
+  cursor: pointer;
 }
+.tok:hover { border-color: var(--accent); }
 
 /* Botón "Instalar App" unificado (Web Component @dotrino/install).
    Reusa el estilo del antiguo .install-btn: ghost con borde y acento de messenger. */

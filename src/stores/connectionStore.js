@@ -251,11 +251,40 @@ export const useConnectionStore = defineStore('connection', () => {
     } catch (_) { pairingCode.value = null }
   }
 
-  /** Canjea la cita de otra persona. Devuelve {ok, instance, publickey, error}. */
+  /**
+   * Espera a que el socket esté vivo. La gente abre la app y teclea el código al
+   * instante —o llega con un QR ya escaneado— y el socket tarda un segundo largo
+   * en levantarse: sin esta espera el primer intento se perdía y la culpa se la
+   * llevaba el código, que estaba perfecto.
+   */
+  const waitConnected = async (ms = 8000) => {
+    const t0 = Date.now()
+    while (!isConnected.value && Date.now() - t0 < ms) {
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    return isConnected.value
+  }
+
+  /**
+   * Canjea la cita de otra persona.
+   * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'|'unavailable'}>}
+   *
+   * El `reason` importa: «no hay red» y «ese código no vale» se arreglan de forma
+   * distinta —una esperando, la otra pidiendo otro código— y decir la segunda
+   * cuando pasa la primera manda a la gente a buscar un problema que no existe.
+   * Se distingue por `e.code`, nunca por el texto del error (que se traduce).
+   */
   const redeemPairingCode = async (code) => {
-    if (IS_RELAY_MODE) return { ok: false, error: 'no disponible en este modo' }
-    try { return await wsProxyClient.redeemPairingCode(code) }
-    catch (e) { return { ok: false, error: e?.message || 'no se pudo canjear' } }
+    if (IS_RELAY_MODE) return { ok: false, reason: 'unavailable' }
+    if (!(await waitConnected())) return { ok: false, reason: 'offline' }
+    try {
+      const res = await wsProxyClient.redeemPairingCode(code)
+      if (res?.ok && res.instance) return res
+      return { ok: false, reason: 'invalid', error: res?.error }
+    } catch (e) {
+      const roto = e?.code === 'NOT_CONNECTED' || e?.code === 'REQUEST_TIMEOUT'
+      return { ok: false, reason: roto ? 'offline' : 'invalid', error: e?.message }
+    }
   }
 
   // Solo el offscreen procesa la cola.
@@ -311,7 +340,7 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   return {
-    token, pairingCode, refreshPairingCode, redeemPairingCode,
+    token, pairingCode, refreshPairingCode, redeemPairingCode, waitConnected,
     isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
     myPublickey, queuedDelivered,
     connect, disconnect, sendMessage, sendByPubkey, setNickname, setPresenceChannel, wsProxyClient,

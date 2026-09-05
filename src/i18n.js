@@ -48,7 +48,11 @@ export const messages = {
       button: 'Entrar',
     },
 
-    topbar: { bell: 'Notificaciones y solicitudes' },
+    topbar: {
+      bell: 'Notificaciones y solicitudes',
+      copyCode: 'Tu código para que te agreguen — tócalo para copiarlo',
+      copied: '✓ Copiado',
+    },
 
     sidebar: { title: 'Contactos', add: 'Añadir contacto' },
 
@@ -56,7 +60,7 @@ export const messages = {
     empty: {
       title: 'Selecciona un contacto',
       before: 'Para empezar una conversación, elige a alguien de la lista, o pulsa',
-      after: 'para añadir un contacto nuevo con su token.',
+      after: 'para añadir un contacto nuevo con su código.',
     },
 
     welcome: {
@@ -73,22 +77,27 @@ export const messages = {
     add: {
       title: 'Añadir contacto',
       close: 'Cerrar',
-      tabAdd: '🔗 Por token',
-      tabMine: '📤 Mi token',
-      info: 'Pega aquí el token que te compartió tu contacto. En el primer mensaje comprobamos que de verdad sea esa persona.',
+      tabAdd: '🔗 Por código',
+      tabMine: '📤 Mi código',
+      info: 'Escribe el código de 6 caracteres que te dio tu contacto, o escanea su QR. En el primer mensaje comprobamos que de verdad sea esa persona.',
       fieldToken: 'Código de tu contacto',
       phToken: 'ej. K7M2Q9',
       paste: 'Pegar',
+      scan: '📷 Escanear su QR',
+      qrHint: 'Que apunte la cámara de su teléfono a este código.',
       fieldAlias: 'Apodo (opcional)',
       phAlias: 'ej. Bob de chess',
       hint: 'Le enviaremos un saludo cifrado con tu identidad. Cuando responda, aparecerá en tu lista automáticamente.',
-      mineInfo: 'Comparte este token con tu contacto. Cambia cada vez que te conectas, pero tu identidad sigue siendo la misma.',
+      mineInfo: 'Dile este código a tu contacto, o deja que escanee el QR. Son 6 caracteres, valen para una sola persona y caducan a los pocos minutos: se renueva solo.',
       copy: 'Copiar',
       cancel: 'Cancelar',
       send: 'Enviar saludo',
+      sending: 'Enviando…',
       done: 'Listo',
       errInvalid: 'Ese código no vale. Son 6 caracteres y caducan a los pocos minutos: pídele uno nuevo.',
-      errOwn: 'Ese es tu propio token.',
+      errOwn: 'Ese es tu propio código.',
+      errOffline: 'Todavía no hay conexión. Espera un momento y vuelve a intentarlo.',
+      errNoCode: 'Ese QR no lleva ningún código de contacto.',
       errSend: 'No se pudo enviar el saludo.',
     },
 
@@ -144,14 +153,18 @@ export const messages = {
       button: 'Log in',
     },
 
-    topbar: { bell: 'Notifications and requests' },
+    topbar: {
+      bell: 'Notifications and requests',
+      copyCode: 'Your code for people to add you — tap to copy',
+      copied: '✓ Copied',
+    },
 
     sidebar: { title: 'Contacts', add: 'Add contact' },
 
     empty: {
       title: 'Pick a contact',
       before: 'To start a conversation, choose someone from the list, or press',
-      after: 'to add a new contact with their token.',
+      after: 'to add a new contact with their code.',
     },
 
     welcome: {
@@ -168,22 +181,27 @@ export const messages = {
     add: {
       title: 'Add contact',
       close: 'Close',
-      tabAdd: '🔗 By token',
-      tabMine: '📤 My token',
-      info: 'Paste the token your contact shared with you. On the first message we check that it really is them.',
+      tabAdd: '🔗 By code',
+      tabMine: '📤 My code',
+      info: 'Type the 6-character code your contact gave you, or scan their QR. On the first message we check that it really is them.',
       fieldToken: "Your contact's code",
       phToken: 'e.g. K7M2Q9',
       paste: 'Paste',
+      scan: '📷 Scan their QR',
+      qrHint: 'Have them point their phone camera at this code.',
       fieldAlias: 'Nickname (optional)',
       phAlias: 'e.g. Bob from chess',
       hint: 'We will send them an encrypted hello signed with your identity. Once they reply, they show up in your list automatically.',
-      mineInfo: 'Share this token with your contact. It changes every time you connect, but your identity stays the same.',
+      mineInfo: 'Tell your contact this code, or let them scan the QR. It is 6 characters, works for one person only and expires after a few minutes: it renews itself.',
       copy: 'Copy',
       cancel: 'Cancel',
       send: 'Send hello',
+      sending: 'Sending…',
       done: 'Done',
       errInvalid: 'That code is not valid. Codes are 6 characters and expire after a few minutes — ask for a new one.',
-      errOwn: 'That is your own token.',
+      errOwn: 'That is your own code.',
+      errOffline: 'There is no connection yet. Wait a moment and try again.',
+      errNoCode: 'That QR does not carry a contact code.',
       errSend: 'The hello could not be sent.',
     },
 

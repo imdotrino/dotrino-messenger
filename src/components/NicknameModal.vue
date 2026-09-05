@@ -27,6 +27,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
         <span class="label">{{ t.welcome.label }}</span>
         <input
           ref="inputEl"
+          data-testid="nickname-input"
           v-model="nick"
           @keyup.enter="submit"
           :placeholder="t.welcome.placeholder"
@@ -36,7 +37,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
         <span class="helper">{{ t.welcome.helper }}</span>
       </label>
 
-      <button class="btn primary-cta" :disabled="!valid(nick)" @click="submit">
+      <button class="btn primary-cta" data-testid="nickname-submit" :disabled="!valid(nick)" @click="submit">
         {{ t.welcome.submit }}
         <span class="arrow">→</span>
       </button>

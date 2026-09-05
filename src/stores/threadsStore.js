@@ -409,6 +409,10 @@ export const useThreadsStore = defineStore('threads', () => {
       if (fromToken) pendingByToken.set(fromToken, payload.pubkey)
       contacts.markOnline(payload.pubkey, fromToken)
       greetBack(fromToken)
+      // Si alguien nuevo saluda es porque acaba de canjear tu código, y un código
+      // es de UN SOLO USO: el que se ve en pantalla ya está quemado. Se pide otro
+      // ahora, no dentro de cinco minutos, o el siguiente amigo teclea uno muerto.
+      connection.refreshPairingCode?.().catch?.(() => {})
       // Alguien te está agregando: lo dejamos VISIBLE en Solicitudes aunque
       // todavía no mande un mensaje (antes solo quedaba en memoria y no se veía
       // nada). Idempotente por pubkey; si luego llega un DM, se actualiza el texto.

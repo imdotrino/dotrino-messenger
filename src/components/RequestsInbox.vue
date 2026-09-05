@@ -30,8 +30,8 @@ const dismiss = (pk) => threads.dismissRequest(pk)
           <div class="req-msg">{{ r.text || t.requests.defaultMsg }}</div>
         </div>
         <div class="req-actions">
-          <button class="ok" @click="accept(r.pubkey)" :title="t.requests.accept">✓</button>
-          <button class="no" @click="dismiss(r.pubkey)" :title="t.requests.dismiss">✕</button>
+          <button class="ok" data-testid="accept-request" @click="accept(r.pubkey)" :title="t.requests.accept">✓</button>
+          <button class="no" data-testid="dismiss-request" @click="dismiss(r.pubkey)" :title="t.requests.dismiss">✕</button>
         </div>
       </li>
     </ul>

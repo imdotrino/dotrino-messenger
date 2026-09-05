@@ -118,7 +118,7 @@ const grouped = computed(() => {
           <div v-if="item.kind === 'sep'" class="day-sep">
             <span>{{ fmtDay(item.ts) }}</span>
           </div>
-          <div v-else :class="['msg', item.dir]">
+          <div v-else :class="['msg', item.dir]" :data-testid="'msg-' + item.dir">
             <div class="bubble">
               <div class="text">{{ item.text }}</div>
               <div class="meta">
@@ -140,7 +140,7 @@ const grouped = computed(() => {
         data-testid="composer-input"
         @keydown.enter.exact.prevent="send"
       />
-      <button class="send" :disabled="!text.trim()" type="submit" :title="t.conv.send">
+      <button class="send" data-testid="send-message" :disabled="!text.trim()" type="submit" :title="t.conv.send">
         <span>➤</span>
       </button>
     </form>
