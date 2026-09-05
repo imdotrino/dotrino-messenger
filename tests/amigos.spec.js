@@ -133,7 +133,7 @@ test('una amiga entra escaneando el QR del otro', async () => {
     await qr.waitFor({ timeout: ESPERA })
     await qr.screenshot({ path: png })
     expect(fs.statSync(png).size, 'la captura del QR salió vacía').toBeGreaterThan(0)
-    await ana.page.keyboard.press('Escape')
+    await ana.page.getByTestId('close-add').click()
 
     // 2) Carla abre el escáner y le da la foto. El input vive en el Shadow DOM de
     //    <dotrino-qr-scan>; Playwright lo atraviesa solo.

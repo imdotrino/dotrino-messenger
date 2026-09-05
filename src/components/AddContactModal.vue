@@ -133,7 +133,7 @@ const pasteToken = async () => {
     <div class="modal">
       <header class="head">
         <h2>{{ t.add.title }}</h2>
-        <button class="x" @click="emit('close')" :aria-label="t.add.close">×</button>
+        <button class="x" data-testid="close-add" @click="emit('close')" :aria-label="t.add.close">×</button>
       </header>
 
       <div class="body">
