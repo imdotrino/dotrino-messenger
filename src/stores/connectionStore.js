@@ -113,14 +113,13 @@ export const useConnectionStore = defineStore('connection', () => {
     // siguiera en null, decrypt() usaría la wrap key equivocada y los mensajes
     // offline se descartarían silenciosamente ("decrypt failed").
     myPublickey.value = publickey
-    const data = { op: 'identify', publickey, token: token.value, ts: Date.now() }
-    const { signature } = await id.signData(data)
     // "Una identidad": si estás emparejado con tu vault, presenta el cert → el proxy
     // también te entrega los mensajes dirigidos a tu maestra M (todos tus dispositivos =
     // una sola identidad). Sin pairing, cert=null e identify se comporta igual que hoy.
     let cert = null
     try { cert = (await id.getVaultCert?.())?.cert || null } catch (_) {}
-    const result = await wsProxyClient.identify({ data, signature, cert })
+    // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
+    const result = await wsProxyClient.identifyAs({ publickey, sign: (d) => id.signData(d), cert })
     queuedDelivered.value = result?.queued_delivered || 0
     // Si el usuario activó notificaciones, re-registrar la push subscription
     // (los endpoints pueden rotar). Silencioso si no optó o falta permiso.
