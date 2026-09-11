@@ -109,7 +109,7 @@ export const useConnectionStore = defineStore('connection', () => {
     // hay un método getPublicKey() en la API.
     const publickey = id.me?.publickey
     if (!publickey) {
-      console.warn('vault me.publickey no disponible — saltando identify')
+      console.warn('[cc-conn] vault me.publickey missing - skipping identify')
       return
     }
     // Fijar myPublickey ANTES de identify: el proxy drena la cola offline
@@ -207,7 +207,7 @@ export const useConnectionStore = defineStore('connection', () => {
       recordFail(wsUrl.value)
       const ranked = await rankHealthy(KNOWN_PROXIES.value.filter(u => u !== wsUrl.value))
       if (ranked.length) { console.warn('[cc-conn] failover →', ranked[0]); await setProxyUrl(ranked[0], { persist: false }); return }
-      console.warn('[cc-conn] sin proxio alternativo sano; reintento en 10s')
+      console.warn('[cc-conn] no healthy alternative proxy; retrying in 10s')
       setTimeout(() => { if (!isConnected.value) connect().catch(() => {}) }, 10000)
     } finally { failingOver = false }
   }
@@ -222,7 +222,7 @@ export const useConnectionStore = defineStore('connection', () => {
     await loadNodeDirectory()
     if (!IS_RELAY_MODE && !localStorage.getItem('messenger_proxy_url')) {
       const best = await pickBestProxy()
-      if (best) { wsUrl.value = best; console.log('[cc-conn] auto-seleccionado:', best) }
+      if (best) { wsUrl.value = best; console.log('[cc-conn] auto-selected:', best) }
     }
   })()
 

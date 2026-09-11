@@ -40,7 +40,7 @@ export const useContactsStore = defineStore('contacts', () => {
   const addContact = async ({ pubkey, nickname, token, encryptionPubkey, notes }) => {
     if (!pubkey) throw new Error('pubkey required')
     const id = await getIdentity()
-    if (!id) throw new Error('Identity vault no disponible')
+    if (!id) throw new Error('identity vault unreachable')
     const cleanNick = nickname ? sanitizeNickname(nickname) : undefined
     await id.addContact({
       publickey: pubkey,
@@ -106,7 +106,7 @@ export const useContactsStore = defineStore('contacts', () => {
   // atesta firmado en el registro. La reputación se pondera por confianza (anti-sybil).
   const ratePeer = async (pubkey, valueOrIndicators, notes) => {
     const id = await getIdentity()
-    if (!id) throw new Error('Identity vault no disponible')
+    if (!id) throw new Error('identity vault unreachable')
     const indicators = typeof valueOrIndicators === 'number'
       ? { confianza: valueOrIndicators }
       : (valueOrIndicators || {})
@@ -115,7 +115,7 @@ export const useContactsStore = defineStore('contacts', () => {
     try {
       const rep = await getReputation()
       await rep?.client.publishRating({ subject: pubkey, indicators, notes: notes || undefined })
-    } catch (e) { console.warn('[reputation] publish falló', e) }
+    } catch (e) { console.warn('[reputation] publish failed:', e) }
   }
 
   // Mis propios indicadores hacia un peer (desde mi atestación en el registro),
@@ -145,7 +145,7 @@ export const useContactsStore = defineStore('contacts', () => {
       const rep = await getReputation()
       if (!rep) return null
       return await rep.reputationOf(pubkey)
-    } catch (e) { console.warn('[reputation] lookup falló', e); return null }
+    } catch (e) { console.warn('[reputation] lookup failed:', e); return null }
   }
 
   return {

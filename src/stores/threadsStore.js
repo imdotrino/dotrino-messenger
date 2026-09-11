@@ -257,7 +257,7 @@ export const useThreadsStore = defineStore('threads', () => {
     }
     try {
       const id = await getIdentity()
-      if (!id) throw new Error('Identity vault no disponible')
+      if (!id) throw new Error('identity vault unreachable')
       // El proxy direcciona por pubkey: si está online, entrega al instante;
       // si no, encola hasta 24h. El "token" del wrap puede ser cualquier
       // identificador estable: usamos la pubkey del destinatario para que

@@ -51,9 +51,9 @@ async function bridgeImportIfAvailable (id) {
       await id.importIdentity(blob)
       _lastPushedHash = hashBlob(blob)  // ya está sincronizado con el bridge
     } finally { _isImporting = false }
-    console.log('[cc-id-bridge] vault hidratado desde el bridge')
+    console.log('[cc-id-bridge] vault hydrated from the bridge')
   } catch (e) {
-    console.warn('[cc-id-bridge] import inicial falló:', e?.message || e)
+    console.warn('[cc-id-bridge] initial import failed:', e?.message || e)
   }
 }
 
@@ -86,7 +86,7 @@ async function _doPush (id) {
     _lastPushedHash = h
     await setIdentityBlob(blob)
   } catch (e) {
-    console.warn('[cc-id-bridge] push falló:', e?.message || e)
+    console.warn('[cc-id-bridge] push failed:', e?.message || e)
   }
 }
 
