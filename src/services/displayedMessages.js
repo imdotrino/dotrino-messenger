@@ -7,9 +7,11 @@
 // extensión).
 
 import { kvGet, kvSet, onKvChanged } from './identityBridge'
+import { key as accountKey } from './account'
 
-const STORAGE_KEY = 'cc-displayed-msgs-v1'
-const LS_KEY = 'cc_displayed_msgs_v1'
+// Funciones, no constantes: al importar el módulo la cuenta aún no está resuelta.
+const storageKey = () => accountKey('cc-displayed-msgs-v1')
+const lsKey = () => accountKey('cc_displayed_msgs_v1')
 const MAX = 500
 
 let cache = new Set()
@@ -19,21 +21,21 @@ async function ensureLoaded () {
   if (loaded) return
   loaded = true
   try {
-    const remote = await kvGet(STORAGE_KEY)
+    const remote = await kvGet(storageKey())
     if (Array.isArray(remote)) {
       cache = new Set(remote)
       return
     }
   } catch (_) {}
   try {
-    const local = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
+    const local = JSON.parse(localStorage.getItem(lsKey()) || '[]')
     if (Array.isArray(local)) cache = new Set(local)
   } catch (_) {}
 }
 
 // Sincroniza ediciones desde otros contextos (otra pestaña marcó un mensaje).
 onKvChanged((key, value) => {
-  if (key !== STORAGE_KEY || !Array.isArray(value)) return
+  if (key !== storageKey() || !Array.isArray(value)) return
   cache = new Set(value)
 })
 
@@ -58,7 +60,7 @@ export async function markDisplayed (id) {
   if (arr.length > MAX) arr = arr.slice(-MAX)
   cache = new Set(arr)
   // Persistencia: bridge primero, fallback a localStorage.
-  try { await kvSet(STORAGE_KEY, arr) } catch (_) {}
-  try { localStorage.setItem(LS_KEY, JSON.stringify(arr)) } catch (_) {}
+  try { await kvSet(storageKey(), arr) } catch (_) {}
+  try { localStorage.setItem(lsKey(), JSON.stringify(arr)) } catch (_) {}
   return true
 }

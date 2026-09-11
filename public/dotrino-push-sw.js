@@ -16,7 +16,7 @@
  */
 
 const DEFAULT_TITLE = 'Dotrino'
-const DEFAULT_BODY = 'Tenés mensajes nuevos'
+const DEFAULT_BODY = 'Tienes mensajes nuevos'
 const DEFAULT_URL = '/'
 
 self.addEventListener('push', (event) => {

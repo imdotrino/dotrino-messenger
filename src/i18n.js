@@ -38,6 +38,15 @@ export const messages = {
   es: {
     boot: { loading: 'Cargando…' },
 
+    // Qué cuenta está abierta. Lenguaje llano (§9.1): «cuenta», nunca «perfil
+    // activo» ni «acta» ni «revocado».
+    account: {
+      switched: 'Estás usando otra cuenta. Tus contactos y tus conversaciones son los de esta cuenta; los de la anterior siguen guardados y vuelven si cambias a ella.',
+      removed: 'Este dispositivo ya no pertenece a esa cuenta, así que aquí se cerró. Empiezas con una cuenta nueva en este dispositivo.',
+      unpaired: 'Soltaste la bóveda. Esta cuenta sigue funcionando en este dispositivo, pero ya no se respalda ni se comparte con tus otros aparatos.',
+      close: 'Cerrar el aviso'
+    },
+
     // Overlay de la extensión: aquí no se puede crear la cuenta, se manda al
     // messenger real. Sin jerga: nada de "iframe", "storage particionado" ni
     // "APIs criptográficas" — solo qué hacer.
@@ -112,6 +121,11 @@ export const messages = {
     },
 
     conv: {
+      // Aviso de versiones (§14). En llano: se nombra la app, no el «protocolo».
+      compat: {
+        incompatible: 'Esta persona usa una versión del messenger que no encaja con la tuya. Puede que los mensajes no le lleguen. Si podéis, actualizad los dos a la última.',
+        unknown: 'No se sabe qué versión del messenger usa esta persona: es anterior a la que lo dice. Si algo no llega, esa es la primera pista.'
+      },
       back: 'Volver',
       rate: 'Calificar',
       online: 'en línea',
@@ -145,6 +159,13 @@ export const messages = {
 
   en: {
     boot: { loading: 'Loading…' },
+
+    account: {
+      switched: 'You are using a different account. These contacts and conversations belong to this account; the previous ones are still saved and come back if you switch to it.',
+      removed: 'This device no longer belongs to that account, so it was closed here. You are starting with a new account on this device.',
+      unpaired: 'You let go of the vault. This account still works on this device, but it is no longer backed up or shared with your other devices.',
+      close: 'Dismiss'
+    },
 
     login: {
       title: 'Sign in',
@@ -216,6 +237,10 @@ export const messages = {
     },
 
     conv: {
+      compat: {
+        incompatible: 'This person runs a version of the messenger that does not match yours. Messages may not reach them. If you can, both update to the latest.',
+        unknown: 'It is not known which version of the messenger this person runs: theirs is older than the one that says so. If something does not arrive, start there.'
+      },
       back: 'Back',
       rate: 'Rate',
       online: 'online',

@@ -3,6 +3,16 @@ import { ref, nextTick, watch, computed } from 'vue'
 import { useThreadsStore } from '../stores/threadsStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { t, locale } from '../i18n'
+// El AVATAR es el del ecosistema, no uno de la app. Se importa del pilar por su
+// subpath barato (`@dotrino/identity/avatar`, sin arrastrar el vault): es un identicon
+// DETERMINISTA del pubkey, el mismo que pintan <dotrino-topbar> y <dotrino-profile>.
+//
+// Antes cada vista dibujaba las iniciales del apodo sobre un disco de color de una
+// paleta propia. Dos consecuencias, las dos vistas: el mismo contacto se veía distinto
+// en la lista que en su ficha, y el avatar CAMBIABA al cambiar el apodo (que cambia
+// solo, en el saludo). El identicon no se mueve: la llave no cambia.
+import { avatarDataUri } from '@dotrino/identity/avatar'
+
 
 const threads = useThreadsStore()
 const contacts = useContactsStore()
@@ -14,6 +24,9 @@ const scroller = ref(null)
 const c = computed(() => threads.activeContact)
 const online = computed(() => c.value && contacts.isOnline(c.value.publickey))
 const rating = computed(() => c.value ? contacts.ratingFor(c.value.publickey) : null)
+// Versión de la otra punta (§14). No bloquea nada: se enseña aquí, pegado a la
+// conversación, porque es donde la incompatibilidad se nota como «no me contesta».
+const compat = computed(() => c.value ? (threads.peerCompat[c.value.publickey] || '') : '')
 
 const stars = (val) => {
   if (val == null) return ''
@@ -47,19 +60,6 @@ const fmtDay = (ts) => {
   return d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-const initials = (s) => (s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase()
-
-const palette = [
-  '#9c7a8c', '#c89738', '#5a8a3a', '#a37a45',
-  '#6b8a9c', '#c0392b', '#7a6b5d', '#b8773d'
-]
-const avatarBg = (key) => {
-  const s = key || ''
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return palette[h % palette.length]
-}
-
 // Group messages by day for the separators.
 const grouped = computed(() => {
   const out = []
@@ -81,9 +81,7 @@ const grouped = computed(() => {
     <header class="head">
       <button class="back" @click="emit('back')" :title="t.conv.back">←</button>
       <div class="avatar-wrap" @click="emit('rate', c.publickey)" :title="t.conv.rate">
-        <div class="avatar" :style="{ background: avatarBg(c.publickey) }">
-          {{ initials(c.nickname) }}
-        </div>
+        <img class="avatar" :src="avatarDataUri(c.publickey, { size: 76 })" alt="" />
         <span v-if="online" class="online-dot"></span>
       </div>
       <div class="who">
@@ -105,6 +103,8 @@ const grouped = computed(() => {
       </div>
       <button class="rate-btn" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
     </header>
+
+    <div v-if="compat" class="compat-note" role="status">{{ t.conv.compat[compat] }}</div>
 
     <div class="messages" ref="scroller">
       <div v-if="threads.activeThread.length === 0" class="empty">
@@ -173,12 +173,16 @@ const grouped = computed(() => {
 .avatar {
   width: 38px; height: 38px;
   border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: #ffffff;
-  font-family: var(--font-headline);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: -0.02em;
+  display: block;
+  background: var(--bg-4);
+}
+.compat-note {
+  padding: 8px 16px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 .online-dot {
   position: absolute;

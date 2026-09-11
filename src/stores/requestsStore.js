@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { key as accountKey } from '../services/account'
 
 // Bandeja de SOLICITUDES de contacto. Mensajes de pubkeys que NO están en tus
 // contactos caen acá en vez de auto-agregarse. Es EFÍMERA y local a este
@@ -8,12 +9,15 @@ import { ref } from 'vue'
 // aceptás. Cada entrada guarda lo mínimo para poder responder si aceptás
 // (encryptionPubkey + token) + el primer mensaje + si está "avalado por tu red".
 
-const LS_KEY = 'cc-requests-v1'
+// Namespaceada por cuenta (services/account.js): una solicitud es PARA una identidad,
+// y sin esto las de una cuenta aparecían al entrar con otra. Función y no constante:
+// al importar el módulo la cuenta todavía no está resuelta.
+const lsKey = () => accountKey('cc-requests-v1')
 const TTL_MS = 24 * 60 * 60 * 1000
 
 function loadInitial () {
   try {
-    const raw = localStorage.getItem(LS_KEY)
+    const raw = localStorage.getItem(lsKey())
     const arr = raw ? JSON.parse(raw) : []
     const now = Date.now()
     return Array.isArray(arr) ? arr.filter(r => r && (now - (r.ts || 0)) < TTL_MS) : []
@@ -24,7 +28,7 @@ export const useRequestsStore = defineStore('requests', () => {
   const requests = ref(loadInitial())
 
   const persist = () => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(requests.value)) } catch (_) {}
+    try { localStorage.setItem(lsKey(), JSON.stringify(requests.value)) } catch (_) {}
   }
 
   const prune = () => {

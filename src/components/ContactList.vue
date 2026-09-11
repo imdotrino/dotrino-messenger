@@ -3,6 +3,16 @@ import { computed } from 'vue'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
 import { t, locale } from '../i18n'
+// El AVATAR es el del ecosistema, no uno de la app. Se importa del pilar por su
+// subpath barato (`@dotrino/identity/avatar`, sin arrastrar el vault): es un identicon
+// DETERMINISTA del pubkey, el mismo que pintan <dotrino-topbar> y <dotrino-profile>.
+//
+// Antes cada vista dibujaba las iniciales del apodo sobre un disco de color de una
+// paleta propia. Dos consecuencias, las dos vistas: el mismo contacto se veía distinto
+// en la lista que en su ficha, y el avatar CAMBIABA al cambiar el apodo (que cambia
+// solo, en el saludo). El identicon no se mueve: la llave no cambia.
+import { avatarDataUri } from '@dotrino/identity/avatar'
+
 
 const contacts = useContactsStore()
 const threads = useThreadsStore()
@@ -31,27 +41,6 @@ const stars = (val) => {
   if (val == null) return ''
   const full = Math.round(val)
   return '★'.repeat(full) + '☆'.repeat(5 - full)
-}
-
-const initials = (s) => (s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase()
-
-// Color hash for avatar background — deterministic by pubkey/nickname.
-// Picks from a warm palette consistent with the design system.
-const palette = [
-  '#9c7a8c', // dusty violet
-  '#c89738', // amber
-  '#5a8a3a', // olive
-  '#a37a45', // bronze
-  '#6b8a9c', // muted blue
-  '#c0392b', // terracotta (rare)
-  '#7a6b5d', // taupe
-  '#b8773d'  // ochre
-]
-const avatarBg = (key) => {
-  const s = key || ''
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return palette[h % palette.length]
 }
 
 // El día ("lun"/"Mon") y el mes ("ene"/"Jan") son texto VISIBLE: van en el idioma
@@ -83,9 +72,7 @@ const fmtTime = (ts) => {
       @click="emit('select', c.publickey)"
     >
       <div class="avatar-wrap" @click.stop="emit('rate', c.publickey)" :title="t.list.rate">
-        <div class="avatar" :style="{ background: avatarBg(c.publickey) }">
-          {{ initials(c.nickname) }}
-        </div>
+        <img class="avatar" :src="avatarDataUri(c.publickey, { size: 84 })" alt="" />
         <span v-if="c.online" class="online-dot"></span>
       </div>
       <div class="body">
@@ -145,12 +132,8 @@ const fmtTime = (ts) => {
 .avatar {
   width: 42px; height: 42px;
   border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: #ffffff;
-  font-family: var(--font-headline);
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: -0.02em;
+  display: block;
+  background: var(--bg-4);
 }
 .online-dot {
   position: absolute;

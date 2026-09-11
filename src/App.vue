@@ -20,6 +20,7 @@ import { getNotifications, notifSoundEnabled } from './services/notifications'
 import { getIdentity } from './services/identity'
 import { getReputation } from './services/reputation'
 import { isDisplayed, markDisplayed } from './services/displayedMessages'
+import { changed as accountChanged, accountId, forgetAccount } from './services/account'
 import { useBackLayer } from '@dotrino/nav/vue'
 import { t, lang, setLang } from './i18n'
 
@@ -74,6 +75,36 @@ if (typeof window !== 'undefined') {
 }
 const showNotif = ref(false)
 const ratingFor = ref(null)
+
+/* ----- Qué cuenta es esta -----
+ * Cambiar de cuenta no es reactivo en el ecosistema (multi-perfil: la app recarga y
+ * arranca con la nueva), así que lo único que hace falta aquí es DECIRLO. Antes no se
+ * decía: la app aparecía con el nombre de la cuenta anterior, otro avatar, sin
+ * contactos y sin chats, y no había forma de saber que estabas en otra cuenta.
+ */
+const avisoCuenta = ref(accountChanged() ? 'switched' : '')
+const cerrarAvisoCuenta = () => { avisoCuenta.value = '' }
+
+/**
+ * El vault avisa de lo que le pasa a esta cuenta. Los dos que importan aquí:
+ * `revoked`/`account-removed` (a este aparato lo echaron y su cuenta se borró, con
+ * aviso FIRMADO) y `unpaired` (se soltó la bóveda a propósito). El primero deja
+ * huérfano el espejo local; el segundo NO borra nada, solo se avisa.
+ */
+const escucharVault = (id) => {
+  try {
+    id.onVault?.((ev) => {
+      const fase = ev?.phase
+      if (fase === 'account-removed' || fase === 'revoked') {
+        const ida = ev?.removed || accountId()
+        forgetAccount(ida)
+        avisoCuenta.value = 'removed'
+      } else if (fase === 'unpaired') {
+        avisoCuenta.value = 'unpaired'
+      }
+    })
+  } catch (_) { /* cliente viejo sin eventos de vault */ }
+}
 
 // Lo que se enseña acá es el CÓDIGO de emparejamiento (6 caracteres, un solo uso,
 // caduca a los minutos y se renueva solo). NO la instancia: son 34 caracteres, es
@@ -146,6 +177,7 @@ onMounted(async () => {
         // Pilares para el botón/modal de perfil del topbar (§6.1).
         identityInst.value = id
         reputationInst.value = await getReputation()
+        escucharVault(id)
         const vaultNick = id.me?.nickname
         const havePubkey = !!id.me?.publickey
         if (vaultNick && vaultNick !== connection.nickname) {
@@ -155,7 +187,12 @@ onMounted(async () => {
           console.log('[cc-app] boot: applying nickname from vault →', vaultNick)
           connection.setNickname(vaultNick, { writeToVault: !isReadOnlyEmbed })
         } else if (!vaultNick && connection.nicknameSet && !isReadOnlyEmbed) {
-          console.log('[cc-app] boot: backfilling vault.me.nickname from localStorage →', connection.nickname)
+          // El apodo local sí es de ESTA cuenta: su clave va namespaceada por el
+          // perfil activo (services/account.js). Antes no lo estaba, y esta misma
+          // línea le escribía a una cuenta recién nacida el nombre de la anterior
+          // —dejando dos cuentas con el mismo nombre y distinta llave—, que es de
+          // donde salía el «el perfil no era coherente».
+          console.log('[cc-app] boot: backfilling vault.me.nickname from this account →', connection.nickname)
           await id.setMyNickname(connection.nickname).catch(e => console.warn('backfill failed', e))
         } else if (!vaultNick && !connection.nicknameSet && havePubkey && isReadOnlyEmbed) {
           // Overlay con vault hidratado pero sin nickname — el blob fue
@@ -368,6 +405,14 @@ const maybeStartTutorial = () => {
       </div>
     </dotrino-topbar>
 
+    <!-- Qué cuenta es esta. Se dice, no se disimula: el contenido de la app (nombre,
+         avatar, contactos, chats) es de la cuenta activa, y si cambió hay que poder
+         entender por qué está todo distinto. -->
+    <div v-if="avisoCuenta" class="account-note" role="status">
+      <span>{{ t.account[avisoCuenta] }}</span>
+      <button class="account-x" @click="cerrarAvisoCuenta" :aria-label="t.account.close">×</button>
+    </div>
+
     <main class="layout" :class="{ 'show-side': showSidebarMobile }">
       <aside class="sidebar">
         <div class="side-head">
@@ -450,6 +495,24 @@ const maybeStartTutorial = () => {
 .topbar::part(brand-name) { font-family: var(--font-headline); font-weight: 600; font-size: 17px; }
 /* Botón de perfil: mismo ghost circular que el resto de controles de la barra. */
 .topbar::part(profile) { background: var(--bg-4); border-color: var(--border); color: var(--text); }
+
+.account-note {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  flex-shrink: 0;
+}
+.account-note span { flex: 1; }
+.account-x {
+  background: none; border: 0; cursor: pointer;
+  color: var(--muted); font-size: 18px; line-height: 1;
+  padding: 0 4px;
+}
+.account-x:hover { color: var(--text); }
 
 .status { display: flex; gap: 12px; align-items: center; }
 

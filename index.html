@@ -46,7 +46,18 @@
     </script>
 </head>
   <body>
-    <div id="app"></div>
+    <!-- El montaje espera a saber qué cuenta está activa (src/services/account.js),
+         así que la primera pintura la pone el HTML: sin esto es pantalla en blanco. -->
+    <div id="app"><div class="boot">Cargando…</div></div>
+    <style>
+      .boot {
+        display: flex; align-items: center; justify-content: center;
+        height: 100vh; height: 100dvh;
+        background: #faf3e7; color: #8a7a66;
+        font: 15px/1.5 system-ui, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) { .boot { background: #1b2533; color: #8fa3b8; } }
+    </style>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

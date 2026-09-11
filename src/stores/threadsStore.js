@@ -9,6 +9,8 @@ import { getStore } from '../services/store'
 import { getReputation } from '../services/reputation'
 import { sanitizeMessage } from '../utils/sanitize'
 import { pushThreadsToBridge, pullThreadsFromBridge, onThreadsChanged } from '../services/threadsBridge'
+import { key as accountKey } from '../services/account'
+import { MINE as MI_VERSION, revisar } from '../services/compat'
 
 // Peers que nos saludaron (HELLO) pero NO son contactos: guardamos su
 // encryptionPubkey para poder descifrar su DM y rutearlo a Solicitudes. En
@@ -42,17 +44,39 @@ const IS_OVERLAY_EMBED = URL_EMBED === 'overlay'
 
 const MAX_THREAD = 1000   // cap per-thread history (server-side cap también)
 const LEGACY_KEY = 'messenger_threads_v1'  // migración del antiguo localStorage
-const LOCAL_CACHE_KEY = 'messenger_threads_cache_v1'  // espejo local resiliente
+// El espejo local es DE LA CUENTA activa (services/account.js). Sin namespacear, los
+// hilos de una cuenta se veían al entrar con otra.
+//
+// Es una FUNCIÓN, no una constante de módulo: los imports se evalúan mucho antes de
+// que `resolveAccount()` resuelva, así que una constante se quedaba con la clave
+// pelada para siempre — y entonces esto no namespacea nada.
+const cacheKey = () => accountKey('messenger_threads_cache_v1')
 
 const loadLocalCache = () => {
   try {
-    const raw = localStorage.getItem(LOCAL_CACHE_KEY)
+    const raw = localStorage.getItem(cacheKey())
     return raw ? JSON.parse(raw) : {}
   } catch { return {} }
 }
 const saveLocalCache = (data) => {
-  try { localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(data)) }
+  try { localStorage.setItem(cacheKey(), JSON.stringify(data)) }
   catch (e) { console.warn('local thread cache write failed:', e) }
+}
+
+/**
+ * Une dos mapas de hilos por id de mensaje, ordenando por fecha. Gana el más completo:
+ * un mensaje que solo está de un lado se queda, y de los repetidos gana el remoto
+ * (que trae el `pending:false` de un envío ya confirmado).
+ */
+function mergeThreads (local, remote) {
+  const out = {}
+  for (const k of new Set([...Object.keys(local || {}), ...Object.keys(remote || {})])) {
+    const porId = new Map()
+    for (const e of (local?.[k] || [])) if (e?.id) porId.set(e.id, e)
+    for (const e of (remote?.[k] || [])) if (e?.id) porId.set(e.id, { ...porId.get(e.id), ...e })
+    out[k] = [...porId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-MAX_THREAD)
+  }
+  return out
 }
 
 /**
@@ -60,13 +84,13 @@ const saveLocalCache = (data) => {
  * Threads are keyed by contact pubkey.
  *
  * Wire protocol (string format `TYPE|json`):
- *   HELLO            { nickname, encryptionPubkey, pubkey }
+ *   HELLO            { nickname, encryptionPubkey, pubkey, v, card? }
  *   IDENTIFY_CHALLENGE { nonce }
  *   IDENTIFY_RESPONSE  { nonce, signature, publickey, encryptionPubkey }
  *   DM_ENC           { envelope, ts }      payload encrypted with id.encrypt
  *   DM_ACK           { id }
- *   RATING_QUERY     { queryId, subject }
- *   RATING_REPLY     { queryId, subject, mine, endorsements }
+ *   RATING_QUERY     { envelope }            { queryId, subject } cifrado
+ *   RATING_REPLY     { envelope }            { queryId, subject, mine, endorsements } cifrado
  */
 export const useThreadsStore = defineStore('threads', () => {
   const connection = useConnectionStore()
@@ -86,12 +110,14 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   const threads = ref(loadLocalCache())   // hidratación inmediata desde cache local
-  const ACTIVE_KEY = 'messenger_active_pubkey_v1'
+  const ACTIVE_KEY = accountKey('messenger_active_pubkey_v1')
   const activePubkey = ref(localStorage.getItem(ACTIVE_KEY) || null)
   const outbox = ref([])        // messages waiting for recipient to come online
   // Último DM entrante decodificado, para que App.vue muestre la notificación
   // centrada cuando llegue uno nuevo.
   const lastIncomingDM = ref(null)
+  // pubkey -> 'incompatible' | 'unknown'. Lo que dijo su saludo (§14).
+  const peerCompat = ref({})
 
   const activeThread = computed(() => activePubkey.value ? (threads.value[activePubkey.value] || []) : [])
   const activeContact = computed(() => activePubkey.value ? contacts.findByPubkey(activePubkey.value) : null)
@@ -125,13 +151,11 @@ export const useThreadsStore = defineStore('threads', () => {
     for (const k of Object.keys(summaries)) {
       next[k] = await store.listThread(k)
     }
-    // Si el remoto está vacío pero teníamos algo en cache local, conservamos
-    // el cache para no perderlo (puede ser que el vault esté bloqueado).
-    if (Object.keys(next).length === 0 && Object.keys(threads.value).length > 0) {
-      console.warn('[threads] remote store returned empty; keeping local cache')
-      return
-    }
-    threads.value = next
+    // SE FUSIONA, NO SE PISA. Antes esto era `threads.value = next` + guardar: si el
+    // remoto contestaba PARCIAL —el vault todavía reconciliando, un hilo que no llegó—
+    // el espejo local se sobreescribía con menos de lo que tenía y esos mensajes se
+    // perdían para siempre. El guard de «remoto vacío» solo cubría el todo-o-nada.
+    threads.value = mergeThreads(threads.value, next)
     saveLocalCache(threads.value)
     // Comparte snapshot completo con los overlays via chrome.storage bridge.
     if (!IS_OVERLAY_EMBED) pushThreadsToBridge(threads.value)
@@ -173,11 +197,32 @@ export const useThreadsStore = defineStore('threads', () => {
     if (store) { try { await store.appendMessage(pubkey, e) } catch (_) {} }
   }
 
+  /**
+   * Marca como leído lo recibido en un hilo. El contador de no leídos se calculaba
+   * con `!e._read` y NADIE escribía `_read` nunca, así que la burbuja enseñaba el
+   * total de mensajes recibidos y no bajaba jamás.
+   */
+  const markThreadRead = async (pubkey) => {
+    const arr = threads.value[pubkey]
+    if (!arr) return
+    const nuevas = arr.filter(e => e.dir === 'in' && !e._read)
+    if (!nuevas.length) return
+    for (const e of nuevas) e._read = true
+    saveLocalCache(threads.value)
+    if (!IS_OVERLAY_EMBED) pushThreadsToBridge(threads.value)
+    const store = await getStore()
+    if (!store) return
+    for (const e of nuevas) {
+      try { await store.appendMessage(pubkey, e) } catch (_) { /* se reintenta al releer */ }
+    }
+  }
+
   const setActive = (pubkey) => {
     activePubkey.value = pubkey
     if (pubkey) {
       localStorage.setItem(ACTIVE_KEY, pubkey)
       tryHandshake(pubkey)
+      markThreadRead(pubkey).catch(() => {})
     } else {
       localStorage.removeItem(ACTIVE_KEY)
     }
@@ -318,6 +363,7 @@ export const useThreadsStore = defineStore('threads', () => {
     return formatMessage('HELLO', {
       nickname: connection.nickname,
       pubkey, encryptionPubkey,
+      v: MI_VERSION,              // qué soy y qué versión corro (§14)
       ...(card ? { card } : {})
     })
   }
@@ -363,13 +409,21 @@ export const useThreadsStore = defineStore('threads', () => {
       case 'IDENTIFY_RESPONSE':    return handleResponse(fromToken, payload)
       case 'DM_ENC':               return handleDM(fromToken, payload, meta)
       case 'DM_ACK':               return handleAck(fromToken, payload)
-      case 'RATING_QUERY':         return handleRatingQuery(fromToken, payload)
-      case 'RATING_REPLY':         return handleRatingReply(fromToken, payload)
+      case 'RATING_QUERY':         return handleRatingQuery(fromToken, payload, meta)
+      case 'RATING_REPLY':         return handleRatingReply(fromToken, payload, meta)
     }
   }
 
   const handleHello = async (fromToken, payload) => {
     if (!payload?.pubkey) return
+    // Qué versión corre el otro lado (§14). No bloquea: se anota y la conversación lo
+    // enseña. Sin esto, hablarle a una versión que no entiende se ve como silencio.
+    const desajuste = revisar(payload.v)
+    if (desajuste) peerCompat.value = { ...peerCompat.value, [payload.pubkey]: desajuste }
+    else if (peerCompat.value[payload.pubkey]) {
+      const { [payload.pubkey]: _fuera, ...resto } = peerCompat.value
+      peerCompat.value = resto
+    }
     // Su tarjeta de perfil, si la manda: con ella podremos cifrarle a todos sus
     // dispositivos. El vault la verifica y no acepta retrocesos ni cambios de master
     // en silencio; si la rechaza, seguimos como siempre (cifrando solo a este aparato).
@@ -543,7 +597,11 @@ export const useThreadsStore = defineStore('threads', () => {
         // panel deja apagar las de desconocidos). El aval solo cambia jerarquía.
         notify('request', { id: mid, fromPubkey: senderPubkey, fromNickname: senderNick || senderPubkey.slice(0, 8), text: cleanText, ts, request: true, vouched }, vouched)
       } else {
-        const entry = { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null }
+        // Nace leído si su conversación está abierta y la ventana a la vista: si no,
+        // el contador subiría con el mensaje delante de los ojos del usuario.
+        const leido = activePubkey.value === senderPubkey &&
+          (typeof document === 'undefined' || document.visibilityState === 'visible')
+        const entry = { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(leido ? { _read: true } : {}) }
         append(senderPubkey, entry)
 
         // Notifica a la UI para mostrar la notificación centrada (App.vue
@@ -596,43 +654,87 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   // ---- Ratings -----------------------------------------------------------
+  //
+  // VAN CIFRADOS. El proxio no cifra nada de lo que enruta (CONVENCIONES §4.1), y
+  // estos mensajes son lo más delicado que manda el messenger después del propio
+  // texto: preguntan «¿qué sabes de FULANO?» y contestan con calificaciones. En claro,
+  // quien opere el nodo lee tu red de confianza entera — a quién conoces, de quién te
+  // fías y quién te pregunta por quién.
+  //
+  // Se usa el MISMO sobre del vault que el DM (`id.encrypt`), no una cripto propia: es
+  // la que el pilar ya expone y la que sabe abrirle a todos los dispositivos de esa
+  // persona. El HELLO y el desafío no pueden ir así, y no es un descuido: son
+  // justamente el intercambio que entrega la llave con la que se cifra.
+
+  /** Manda `type` cifrado a un contacto. Sin su llave de cifrado no se manda nada. */
+  const sendEnc = async (pubkey, type, payload) => {
+    const c = contacts.findByPubkey(pubkey)
+    if (!c?.encryptionPubkey) return false
+    const id = await getIdentity()
+    if (!id) return false
+    const envelope = await id.encrypt(
+      [{ publickey: pubkey, token: pubkey, encryptionPubkey: c.encryptionPubkey }],
+      JSON.stringify(payload)
+    )
+    const msg = formatMessage(type, { envelope })
+    const token = contacts.liveTokenFor(pubkey)
+    if (token) await connection.sendMessage([token], msg)
+    else       await connection.sendByPubkey([pubkey], msg)
+    return true
+  }
+
+  /** Abre un sobre que llega de `fromToken`/`meta.fromPubkey`. `null` si no se puede. */
+  const openEnc = async (fromToken, payload, meta = {}) => {
+    if (!payload?.envelope) return null
+    const c = (meta.fromPubkey && contacts.findByPubkey(meta.fromPubkey)) ||
+      contacts.contacts.find(x => x.lastToken === fromToken)
+    if (!c?.encryptionPubkey) return null
+    const id = await getIdentity()
+    if (!id) return null
+    try {
+      const r = await id.decrypt(c.encryptionPubkey, connection.myPublickey, payload.envelope)
+      return { from: c, data: JSON.parse(r?.plaintext ?? 'null') }
+    } catch (e) { console.warn('rating envelope could not be opened:', e?.message || e); return null }
+  }
 
   const askRatingsAbout = async (subjectPubkey) => {
     const id = await getIdentity()
     if (!id) return
     const queryId = crypto.randomUUID()
-    const tokens = []
     for (const c of contacts.contacts) {
       if (c.publickey === subjectPubkey) continue
-      const t = contacts.tokenFor(c.publickey)
-      if (t) tokens.push(t)
+      if (!contacts.tokenFor(c.publickey)) continue
+      await sendEnc(c.publickey, 'RATING_QUERY', { queryId, subject: subjectPubkey })
+        .catch(e => console.warn('askRatingsAbout:', e?.message || e))
     }
-    if (tokens.length === 0) return
-    const msg = formatMessage('RATING_QUERY', { queryId, subject: subjectPubkey })
-    await connection.sendMessage(tokens, msg)
   }
 
-  const handleRatingQuery = async (fromToken, payload) => {
+  const handleRatingQuery = async (fromToken, payload, meta = {}) => {
     const id = await getIdentity()
-    if (!id || !payload?.subject || !payload?.queryId) return
+    if (!id) return
+    const abierto = await openEnc(fromToken, payload, meta)
+    // Sin sobre no se contesta. Quien pregunta es un contacto y un contacto tiene
+    // llave; si no la tiene, esto no viene de donde dice venir.
+    if (!abierto?.data?.subject || !abierto.data.queryId) return
     try {
-      const c = contacts.contacts.find(x => x.lastToken === fromToken)
-      if (c) await id.recordQuery(c.publickey, payload.subject)
-      const { mine, endorsements } = await id.getRatingsForSubject(payload.subject)
-      const reply = formatMessage('RATING_REPLY', {
-        queryId: payload.queryId, subject: payload.subject, mine, endorsements
+      await id.recordQuery(abierto.from.publickey, abierto.data.subject)
+      const { mine, endorsements } = await id.getRatingsForSubject(abierto.data.subject)
+      await sendEnc(abierto.from.publickey, 'RATING_REPLY', {
+        queryId: abierto.data.queryId, subject: abierto.data.subject, mine, endorsements
       })
-      await connection.sendMessage([fromToken], reply)
     } catch (e) { console.warn('handleRatingQuery:', e) }
   }
 
-  const handleRatingReply = async (fromToken, payload) => {
+  const handleRatingReply = async (fromToken, payload, meta = {}) => {
     const id = await getIdentity()
-    if (!id || !payload?.subject) return
+    if (!id) return
+    const abierto = await openEnc(fromToken, payload, meta)
+    if (!abierto?.data?.subject) return
+    const data = abierto.data
     try {
-      if (payload.mine) await id.mergeEndorsements(payload.subject, [payload.mine])
-      if (Array.isArray(payload.endorsements) && payload.endorsements.length) {
-        await id.mergeEndorsements(payload.subject, payload.endorsements)
+      if (data.mine) await id.mergeEndorsements(data.subject, [data.mine])
+      if (Array.isArray(data.endorsements) && data.endorsements.length) {
+        await id.mergeEndorsements(data.subject, data.endorsements)
       }
       contacts.refreshPeers()
     } catch (e) { console.warn('handleRatingReply:', e) }
@@ -700,8 +802,8 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   return {
-    threads, activePubkey, activeThread, activeContact, outbox, lastIncomingDM,
-    setActive, sendDM, flushOutbox,
+    threads, activePubkey, activeThread, activeContact, outbox, lastIncomingDM, peerCompat,
+    setActive, sendDM, flushOutbox, markThreadRead,
     handleIncoming, sendHello, sendHelloByPubkey, tryHandshake, sendChallenge,
     askRatingsAbout, load, rememberAlias,
     requests, acceptRequest, dismissRequest

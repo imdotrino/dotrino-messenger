@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWebSocketProxyClient } from '@dotrino/proxy-client'
 import { getIdentity } from '../services/identity'
+import { key as accountKey } from '../services/account'
 import { sanitizeNickname } from '../utils/sanitize'
 import { relayProxyCall, watchOutboundQueue } from '../services/proxyRelay'
 
@@ -46,7 +47,11 @@ export const useConnectionStore = defineStore('connection', () => {
       localStorage.setItem('messenger_proxies', JSON.stringify(merged))
     } catch (_) { /* sin red / CORS → queda el cache/fallback */ }
   }
-  const nickname = ref(sanitizeNickname(localStorage.getItem('messenger_nickname') || ''))
+  // El apodo es DE LA CUENTA, no del navegador: va namespaceado por el perfil activo
+  // (ver services/account.js). Guardarlo suelto era lo que hacía que, al cambiar de
+  // cuenta, la app siguiera enseñando el nombre de la anterior.
+  const NICK_KEY = accountKey('messenger_nickname')
+  const nickname = ref(sanitizeNickname(localStorage.getItem(NICK_KEY) || ''))
   const nicknameSet = computed(() => nickname.value.trim().length > 0)
 
   // Self-presence channel name is derived from my own pubkey, so contacts can
@@ -57,7 +62,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const setNickname = (name, opts = {}) => {
     nickname.value = sanitizeNickname((name || '').trim())
-    localStorage.setItem('messenger_nickname', nickname.value)
+    localStorage.setItem(NICK_KEY, nickname.value)
     // También guardarlo en la vault, así viaja con `id.exportIdentity()` y
     // los overlays particionados pueden recuperarlo del bridge. Si el caller
     // pasa `{ writeToVault: false }` (p.ej. el placeholder derivado del

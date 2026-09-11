@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'node:child_process'
+import pkg from './package.json' with { type: 'json' }
 
 // <meta name="commit"> con el hash del commit del build (CONVENCIONES-APPS §3).
 function commitMeta () {
@@ -54,6 +55,8 @@ export default defineConfig({
       }
     })
   ],
+  // La versión que la app ANUNCIA a la otra punta (§14, services/compat.js).
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   base: './',
   server: {
     port: 5176,

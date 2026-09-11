@@ -8,6 +8,7 @@ import App from './App.vue'
 import '@dotrino/install'
 import '@dotrino/tutorial'
 import { createBackNav } from '@dotrino/nav'
+import { resolveAccount } from './services/account'
 
 // Modo embed: cuando la PWA se carga como iframe desde la extensión
 // (popup/overlay/offscreen), recibimos `?embed=popup` o similar y aplicamos
@@ -59,9 +60,17 @@ if (typeof crypto !== 'undefined' && typeof crypto.randomUUID !== 'function') {
   }
 }
 
-const app = createApp(App)
-app.use(createPinia())
-app.mount('#app')
+// DE QUÉ CUENTA ES ESTO, ANTES DE PINTAR NADA. Los stores leen su estado local al
+// construirse, y ese estado cuelga de la cuenta activa (services/account.js). Si se
+// montara primero, cada store abriría el cajón equivocado —el de la cuenta anterior—
+// y después ya no hay forma de deshacerlo sin recargar.
+resolveAccount()
+  .catch((e) => { console.warn('[cc-messenger] could not resolve the active account:', e?.message || e) })
+  .finally(() => {
+    const app = createApp(App)
+    app.use(createPinia())
+    app.mount('#app')
+  })
 
 registerSW({ immediate: true })
 

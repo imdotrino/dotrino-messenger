@@ -58,16 +58,16 @@ Detalles de implementación:
   vía `workbox.importScripts: ['dotrino-push-sw.js']` (en `vite.config.js`).
   El archivo se sirve desde `public/dotrino-push-sw.js` (copia de
   `@dotrino/proxy-client/sw/`). **No** se registra un segundo SW.
-- **Estado**: `src/stores/notificationsStore.js` (`enable`/`disable`/`ensureSubscribed`),
-  preferencia en `localStorage.messenger_push_enabled`. Tras cada `identify` se
-  re-registra la subscription (los endpoints pueden rotar).
+- **Estado**: `src/services/notifications.js`, sobre `@dotrino/notifications` (panel,
+  preferencias por categoría y Web Push). Tras cada `identify` se re-registra la
+  subscription (los endpoints pueden rotar).
 - **Privacidad**: el contenido nunca pasa por el push service (FCM en Android solo
   ve el metadato del timbre). No hay JS de terceros ni cookies.
 - **iOS/iPadOS**: Safari solo permite Web Push si la PWA está **instalada** en la
   pantalla de inicio (el toggle avisa cuando no hay soporte). En Android/desktop
   funciona también en pestaña normal.
 - **Proxy**: requiere `proxy.dotrino.com` con VAPID habilitado (ver el repo
-  `simple-websocket-proxy`, `DEPLOY.md`).
+  `dotrino-proxy`, `DEPLOY.md`).
 
 ### Configuración OAuth (para que el sync funcione)
 
