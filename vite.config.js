@@ -41,11 +41,31 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: [],
+        // El patrón del ecosistema (CONVENCIONES §3): navegación NETWORK-FIRST con
+        // repliegue a la copia guardada (el deploy se ve al instante, y sin red se
+        // abre igual), y el resto CACHE-FIRST. Los assets llevan hash en el nombre,
+        // así que servirlos de la caché no puede dar una versión vieja.
+        //
+        // Estaba TODO vacío —`globPatterns: []`, `runtimeCaching: []`— y por eso la
+        // app nunca funcionó sin conexión: el Service Worker existía y no guardaba
+        // nada. El `index.html` se queda fuera del precache a propósito: es lo único
+        // sin hash, y precachearlo es lo que sirve un HTML viejo apuntando a chunks
+        // que ya no existen.
+        globPatterns: ['**/*.{js,css,svg,png,ico,webmanifest,jpg}'],
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        runtimeCaching: [],
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'messenger-html',
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 8 }
+            }
+          }
+        ],
         navigateFallback: null,
         // Inyecta los handlers de Web Push (push + notificationclick) en el SW
         // generado por Workbox, en vez de registrar un segundo SW que clobbearía
