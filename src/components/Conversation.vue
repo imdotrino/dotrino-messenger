@@ -120,7 +120,7 @@ const grouped = computed(() => {
           </div>
           <div v-else :class="['msg', item.dir]" :data-testid="'msg-' + item.dir">
             <div class="bubble">
-              <div class="text">{{ item.text }}</div>
+              <div class="text" data-testid="msg-text">{{ item.text }}</div>
               <div class="meta">
                 <span class="time">{{ fmtTime(item.ts) }}</span>
                 <span v-if="item.dir === 'out'" class="check">{{ item.pending ? '⌛' : '✓' }}</span>
