@@ -5,7 +5,7 @@ import { useContactsStore } from './contactsStore'
 import { useRequestsStore } from './requestsStore'
 import { shouldNotifyKind } from '../services/notifications'
 import { getIdentity } from '../services/identity'
-import { getStore } from '../services/store'
+import { getStore, onVaultChanged } from '../services/store'
 import { getReputation } from '../services/reputation'
 import { sanitizeMessage } from '../utils/sanitize'
 import { pushThreadsToBridge, pullThreadsFromBridge, onThreadsChanged } from '../services/threadsBridge'
@@ -776,6 +776,11 @@ export const useThreadsStore = defineStore('threads', () => {
       }
     })
   })()
+
+  // Con el respaldo por partes (@dotrino/store ≥ 0.11) las lecturas son LOCALES: lo que
+  // se escribió en otro aparato ya no aparece solo al leer, llega por este evento. Sin
+  // esto, un mensaje mandado desde el móvil no se vería aquí hasta recargar la página.
+  if (!IS_OVERLAY_EMBED) onVaultChanged(() => reload())
 
   // ---- Solicitudes (bandeja de desconocidos) -----------------------------
 

@@ -21,6 +21,7 @@ import { getIdentity } from './services/identity'
 import { getReputation } from './services/reputation'
 import { isDisplayed, markDisplayed } from './services/displayedMessages'
 import { changed as accountChanged, accountId, forgetAccount } from './services/account'
+import { storeStatus, vaultSyncNow } from './services/store'
 import { useBackLayer } from '@dotrino/nav/vue'
 import { t, lang, setLang } from './i18n'
 
@@ -39,6 +40,15 @@ const onLangChange = (e) => setLang(e.detail?.lang)
 const connection = useConnectionStore()
 const contacts = useContactsStore()
 const threads = useThreadsStore()
+
+// El botón del aviso del almacén: vuelve a intentarlo y, si tampoco se puede, lo dice.
+const reintentarAlmacen = async () => {
+  try {
+    await vaultSyncNow()
+  } catch (e) {
+    console.error('[messenger] the vault backup could not catch up:', e.code || '', e.message)
+  }
+}
 const showAdd = ref(false)
 // Enlace entrante `#add=CÓDIGO`: es el QR de otra persona, escaneado con la cámara
 // del sistema en vez de con la de la app. Se lee ANTES de tocar el hash (el
@@ -411,6 +421,13 @@ const maybeStartTutorial = () => {
     <div v-if="avisoCuenta" class="account-note" role="status">
       <span>{{ t.account[avisoCuenta] }}</span>
       <button class="account-x" @click="cerrarAvisoCuenta" :aria-label="t.account.close">×</button>
+    </div>
+
+    <!-- Sin almacén no hay historial, y el respaldo en tu bóveda puede quedarse caído:
+         se dice, en vez de seguir como si nada. -->
+    <div v-if="storeStatus.error || storeStatus.vault.state === 'error'" class="account-note" role="status" data-testid="store-note">
+      <span>{{ storeStatus.error ? t.store.unreachable : t.store.vaultError }}</span>
+      <button class="btn" @click="reintentarAlmacen">{{ t.store.retry }}</button>
     </div>
 
     <main class="layout" :class="{ 'show-side': showSidebarMobile }">

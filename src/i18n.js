@@ -37,6 +37,11 @@ export const locale = computed(() => (lang.value === 'en' ? 'en-US' : 'es-EC'))
 export const messages = {
   es: {
     boot: { loading: 'Cargando…' },
+    store: {
+      unreachable: 'No se pudo abrir tu almacén: lo que ves es el historial de este aparato.',
+      vaultError: 'El respaldo en tu bóveda está fallando: lo que escribas se guarda aquí, pero no se está copiando.',
+      retry: 'Reintentar'
+    },
 
     // Qué cuenta está abierta. Lenguaje llano (§9.1): «cuenta», nunca «perfil
     // activo» ni «acta» ni «revocado».
@@ -159,6 +164,11 @@ export const messages = {
 
   en: {
     boot: { loading: 'Loading…' },
+    store: {
+      unreachable: 'Your storage could not be opened: what you see is this device’s history.',
+      vaultError: 'The backup to your vault is failing: what you write stays here, but it is not being copied.',
+      retry: 'Try again'
+    },
 
     account: {
       switched: 'You are using a different account. These contacts and conversations belong to this account; the previous ones are still saved and come back if you switch to it.',
