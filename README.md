@@ -23,21 +23,18 @@ El eje del ecosistema **[Dotrino](https://dotrino.com)** es el **autohosteo** y 
 
 ---
 
-App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino). Este repo contiene **dos artefactos**:
+App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino): la **PWA** (`src/`), desplegada en `messenger.dotrino.com`.
 
-- **PWA web** (`src/`) — la app principal, deployada a `messenger.dotrino.com`.
-- **Extensión Chrome** (`extension/`) — shell delgado que reusa la PWA en un iframe; añade overlay sobre cualquier página + service worker que recibe DMs con la pestaña cerrada.
-
-Ambos comparten **identidad** (`id.dotrino.com`) y **histórico de mensajes** (`store.dotrino.com`), así que abrir el messenger en el navegador y la extensión se ven como la misma cosa.
+> La **extensión de Chrome** que enseñaba el messenger encima de cualquier página vive ahora en su propio repo, [`dotrino-messenger-extension`](https://github.com/imdotrino/dotrino-messenger-extension), porque es otro producto: se instala aparte, se revisa aparte y tiene su propia promesa.
 
 ## PWA
 
-- **Identidad compartida** con `id.dotrino.com` (mismas claves entre chat / chess / messenger / extensión).
+- **Identidad compartida** con `id.dotrino.com` (mismas claves entre chat / chess / messenger).
 - **Mensajes E2E** cifrados con ECDH P-256 + AES-256-GCM (vía `Identity.encrypt/decrypt`).
 - **Transporte WebRTC-first** con fallback al proxy (`@dotrino/proxy-client` ≥ 0.4): los DMs viajan por `RTCDataChannel` entre peers cuando ambos están online (señalización por el propio proxy, STUN-only). Si el DataChannel aún no abrió o el peer está offline, cae automáticamente al proxy WS (con cola de 24h cuando el destinatario no está conectado). El switch token-vs-pubkey en `sendDM` decide la ruta: token conocido → `send([token])` (WebRTC eligible), sin token → `sendByPubkey([pubkey])` (cola offline).
 - **Contactos compartidos** en el vault.
-- **Histórico compartido** en `store.dotrino.com` — visible desde web + extensión + futuras apps en el mismo navegador. Con **cache local resiliente** (`localStorage.messenger_threads_cache_v1`): los hilos se hidratan al instante en cada refresh y los mensajes recibidos durante un bache del store remoto (cert caído, vault bloqueado, timeout) sobreviven al reload.
-- **Cola offline 24h** del proxy, multi-instancia con fan-out (web + extensión reciben el mismo DM).
+- **Histórico compartido** en `store.dotrino.com` — visible desde la web y desde futuras apps en el mismo navegador. Con **cache local resiliente** (`localStorage.messenger_threads_cache_v1`): los hilos se hidratan al instante en cada refresh y los mensajes recibidos durante un bache del store remoto (cert caído, vault bloqueado, timeout) sobreviven al reload.
+- **Cola offline 24h** del proxy, multi-instancia con fan-out (todas tus pestañas reciben el mismo DM).
 - **Notificaciones Web Push** (`@dotrino/proxy-client` ≥ 0.5.1): aviso cuando llegan DMs con la app cerrada. Estándar Web Push + VAPID (sin SDK de Firebase, sin trackers). El push es un "timbre" **sin contenido**; el SW despierta, la app reconecta y `identify()` drena la cola cifrada. Activación opt-in desde **👤 Tu cuenta → Notificaciones**. Ver subsección abajo.
 - **PWA**: instalable en móvil; sin cache.
 - **Ranking integrado**: rating propio (★ oro) y derivado por endorsements firmados (★ azul).
@@ -95,38 +92,3 @@ npm run dev
 ### Build / Deploy
 
 GitHub Pages auto-deploy en push a `main`. La PWA se sirve desde `messenger.dotrino.com`.
-
-## Extensión Chrome (`extension/`)
-
-Shell MV3 ultra-delgado:
-
-- `manifest.json` — perms: `offscreen`, `notifications`, `alarms`. Hosts: messenger / id / store / proxy.
-- `background.js` — service worker, solo dispara notificaciones nativas y reenvía eventos del offscreen a tabs.
-- `offscreen.html` — `<iframe src="https://messenger.dotrino.com/?embed=offscreen">`. La PWA mantiene la conexión al proxy y notifica DMs por `postMessage`.
-- `content.js` — Shadow DOM en `<all_urls>`: toasts (fade in/out + mouse pass-through) y panel deslizable que es otro iframe a la PWA.
-- `popup/popup.html` — popup de la barra, también iframe a la PWA.
-
-### Cargar localmente
-
-```
-chrome://extensions/ → Modo desarrollador → Cargar descomprimida → seleccionar carpeta `extension/`
-```
-
-### Empaquetar para Web Store
-
-```bash
-cd extension
-./package-extension.sh        # Linux/macOS
-.\package-extension.ps1       # Windows
-# → ../../cc-messenger-extension-<version>.zip
-```
-
-Documentación de revisión Web Store en `extension/`:
-- `PRIVACY.md` — política de privacidad
-- `PERMISSIONS.md` — justificación de cada permiso (copy-paste durante review)
-- `STORE_LISTING.md` — copy del listado
-- `SUBMISSION.md` — checklist de envío
-
-### CI
-
-Push de tag `ext-v*` (ej: `git tag ext-v1.1.0 && git push --tags`) dispara `.github/workflows/build-extension.yml` que produce el zip como artifact.

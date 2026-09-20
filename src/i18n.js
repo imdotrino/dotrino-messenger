@@ -52,16 +52,6 @@ export const messages = {
       close: 'Cerrar el aviso'
     },
 
-    // Overlay de la extensión: aquí no se puede crear la cuenta, se manda al
-    // messenger real. Sin jerga: nada de "iframe", "storage particionado" ni
-    // "APIs criptográficas" — solo qué hacer.
-    login: {
-      title: 'Inicia sesión',
-      insecure: 'La página donde estás no usa una conexión segura, así que tu cuenta no puede abrirse aquí dentro. Ábrela en su propia pestaña.',
-      intro: 'Crea tu cuenta o entra en messenger.dotrino.com. Se sincroniza sola con la extensión.',
-      button: 'Entrar',
-    },
-
     topbar: {
       bell: 'Notificaciones y solicitudes',
       copyCode: 'Tu código para que te agreguen — tócalo para copiarlo',
@@ -157,9 +147,6 @@ export const messages = {
     },
 
     incoming: { newMessage: 'Mensaje nuevo' },
-
-    // Apodo de emergencia cuando el overlay no trae uno (se ve como "@Yo").
-    fallbackNick: 'Yo',
   },
 
   en: {
@@ -175,13 +162,6 @@ export const messages = {
       removed: 'This device no longer belongs to that account, so it was closed here. You are starting with a new account on this device.',
       unpaired: 'You let go of the vault. This account still works on this device, but it is no longer backed up or shared with your other devices.',
       close: 'Dismiss'
-    },
-
-    login: {
-      title: 'Sign in',
-      insecure: 'The page you are on does not use a secure connection, so your account cannot open in here. Open it in its own tab.',
-      intro: 'Create your account or sign in at messenger.dotrino.com. It syncs with the extension on its own.',
-      button: 'Log in',
     },
 
     topbar: {
@@ -277,7 +257,5 @@ export const messages = {
     },
 
     incoming: { newMessage: 'New message' },
-
-    fallbackNick: 'Me',
   },
 }

@@ -154,9 +154,8 @@ const playBeep = () => {
   } catch (_) { /* autoplay bloqueado hasta interacción: ignorar */ }
 }
 
-// Notificación centrada de DM entrante. Solo el primer contexto que vea un
-// DM nuevo (chequeo atómico contra `cc-displayed-msgs-v1` en chrome.storage)
-// lo muestra; los demás (otras pestañas con FAB, popup, offscreen) skip.
+// Notificación centrada de DM entrante. Solo se enseña la primera vez que se ve
+// un DM nuevo: lo ya mostrado queda anotado (services/displayedMessages).
 const incomingNotification = ref(null)
 const onIncomingDone = (id) => {
   if (incomingNotification.value?.id === id) incomingNotification.value = null
@@ -164,7 +163,7 @@ const onIncomingDone = (id) => {
 watch(() => threads.lastIncomingDM, async (dm) => {
   if (!dm?.id) return
   const wasNew = await markDisplayed(dm.id)
-  if (!wasNew) return  // otra pestaña ya lo mostró
+  if (!wasNew) return  // ya se mostró antes
   incomingNotification.value = dm
   playBeep()
 })
@@ -173,66 +172,39 @@ watch(() => threads.lastIncomingDM, async (dm) => {
 const showSidebarMobile = ref(!threads.activePubkey)
 
 onMounted(async () => {
-  // Bootstrap: fuerza el getIdentity() inicial para que en modo iframe el
-  // bridge intente hidratar el vault desde chrome.storage.local antes de
-  // decidir si mostramos NicknameModal o CTA. Si la vault tiene me.nickname
-  // (después de importar el blob), tomamos ese nick automáticamente.
-  // Si estamos en overlay sobre página HTTP, ni siquiera tratamos de cargar
-  // la vault: crypto.subtle no existe → falla seguro.
-  if (!blockedByInsecureTop) {
-    try {
-      const id = await getIdentity()
-      console.log('[cc-app] boot id.me=', id?.me, 'connection.nickname=', connection.nickname)
-      if (id) {
-        // Pilares para el botón/modal de perfil del topbar (§6.1).
-        identityInst.value = id
-        reputationInst.value = await getReputation()
-        escucharVault(id)
-        const vaultNick = id.me?.nickname
-        const havePubkey = !!id.me?.publickey
-        if (vaultNick && vaultNick !== connection.nickname) {
-          // El vault es la fuente de verdad: si trae nickname y difiere del
-          // local (incluido un placeholder pegado de sesiones previas), lo
-          // aplicamos. En overlay no escribe al vault para no contaminar.
-          console.log('[cc-app] boot: applying nickname from vault →', vaultNick)
-          connection.setNickname(vaultNick, { writeToVault: !isReadOnlyEmbed })
-        } else if (!vaultNick && connection.nicknameSet && !isReadOnlyEmbed) {
-          // El apodo local sí es de ESTA cuenta: su clave va namespaceada por el
-          // perfil activo (services/account.js). Antes no lo estaba, y esta misma
-          // línea le escribía a una cuenta recién nacida el nombre de la anterior
-          // —dejando dos cuentas con el mismo nombre y distinta llave—, que es de
-          // donde salía el «el perfil no era coherente».
-          console.log('[cc-app] boot: backfilling vault.me.nickname from this account →', connection.nickname)
-          await id.setMyNickname(connection.nickname).catch(e => console.warn('backfill failed', e))
-        } else if (!vaultNick && !connection.nicknameSet && havePubkey && isReadOnlyEmbed) {
-          // Overlay con vault hidratado pero sin nickname — el blob fue
-          // publicado por una versión vieja que no sincronizaba el nickname.
-          // Aceptamos un placeholder derivado del pubkey para desbloquear la
-          // UI; el usuario puede actualizar su nick en messenger.dotrino.com
-          // directo y se propagará al overlay.
-          let derived = t.value.fallbackNick
-          try {
-            const pk = JSON.parse(id.me.publickey)
-            derived = (pk?.x || '').slice(0, 6).toUpperCase() || t.value.fallbackNick
-          } catch (_) {}
-          console.log('[cc-app] boot: overlay placeholder nickname →', derived)
-          connection.setNickname(derived, { writeToVault: false })
-        }
+  // Bootstrap: fuerza el getIdentity() inicial antes de decidir si mostramos el
+  // NicknameModal. Si la vault tiene me.nickname, tomamos ese nick automáticamente.
+  try {
+    const id = await getIdentity()
+    console.log('[cc-app] boot id.me=', id?.me, 'connection.nickname=', connection.nickname)
+    if (id) {
+      // Pilares para el botón/modal de perfil del topbar (§6.1).
+      identityInst.value = id
+      reputationInst.value = await getReputation()
+      escucharVault(id)
+      const vaultNick = id.me?.nickname
+      if (vaultNick && vaultNick !== connection.nickname) {
+        // El vault es la fuente de verdad: si trae nickname y difiere del
+        // local (incluido un placeholder pegado de sesiones previas), lo
+        // aplicamos.
+        console.log('[cc-app] boot: applying nickname from vault →', vaultNick)
+        connection.setNickname(vaultNick)
+      } else if (!vaultNick && connection.nicknameSet) {
+        // El apodo local sí es de ESTA cuenta: su clave va namespaceada por el
+        // perfil activo (services/account.js). Antes no lo estaba, y esta misma
+        // línea le escribía a una cuenta recién nacida el nombre de la anterior
+        // —dejando dos cuentas con el mismo nombre y distinta llave—, que es de
+        // donde salía el «el perfil no era coherente».
+        console.log('[cc-app] boot: backfilling vault.me.nickname from this account →', connection.nickname)
+        await id.setMyNickname(connection.nickname).catch(e => console.warn('backfill failed', e))
       }
-    } catch (e) { console.warn('[cc-app] boot identity failed:', e) }
-  }
+    }
+  } catch (e) { console.warn('[cc-app] boot identity failed:', e) }
   booting.value = false
-  // Overlay no abre conexión propia ni hace announceToKnown — el offscreen
-  // mantiene una sola conexión por usuario y procesa los sends de overlays
-  // vía cc-outbound-v1. Popup/offscreen/direct tab sí conectan normalmente.
-  if (connection.nicknameSet && !isReadOnlyEmbed) {
+  if (connection.nicknameSet) {
     await connection.connect()
     await contacts.refreshPeers()
     setTimeout(announceToKnown, 500)
-  } else if (connection.nicknameSet && isReadOnlyEmbed) {
-    // Mark connected (UI dot) — los sends salen por relay.
-    await connection.connect()
-    await contacts.refreshPeers()
   }
   maybeStartTutorial()
   // Después del tutorial (que se salta solo cuando hay enlace entrante).
@@ -315,30 +287,9 @@ useBackLayer(ratingFor, { onClose: () => { ratingFor.value = null } })
 const convoOpen = computed(() => !!threads.activePubkey)
 useBackLayer(convoOpen, { onClose: backToList })
 
-// Modo overlay: storage particionado, no podemos crear identidad útil aquí.
-// Si no llega blob por el bridge, mostramos un CTA al messenger directo en vez
-// del NicknameModal. El usuario crea/usa su cuenta en messenger.dotrino.com
-// (top-level real, unpartitioned) y la extensión propaga el blob al overlay.
-const embed = new URLSearchParams(location.search).get('embed')
-const isReadOnlyEmbed = embed === 'overlay'
-// Embebidos en un iframe de la extensión: main.js NO instala el controlador de
-// "volver" a propósito (ahí no manejamos el history del padre). Le pasamos
-// `no-back` al topbar para que tampoco lo instale él (lo hace si falta).
-const embedInIframe = !!embed && window !== window.top
-// Si la página padre es HTTP, el iframe HTTPS queda non-secure-context y
-// `crypto.subtle` no existe — la vault no puede arrancar, así que ni siquiera
-// intentamos. CTA inmediato.
-const blockedByInsecureTop = isReadOnlyEmbed && !window.isSecureContext
-const openMessengerTab = () => {
-  try { window.open('https://messenger.dotrino.com/', '_blank', 'noopener') }
-  catch (_) { location.href = 'https://messenger.dotrino.com/' }
-}
-
-// Tutorial guiado (una sola vez por dispositivo). Solo en la app real: con apodo,
-// fuera del overlay/iframe, y en visita "limpia" (sin enlace entrante).
+// Tutorial guiado (una sola vez por dispositivo). Solo con apodo y en visita
+// "limpia" (sin enlace entrante).
 const maybeStartTutorial = () => {
-  if (isReadOnlyEmbed || blockedByInsecureTop) return
-  if (typeof window !== 'undefined' && window.self !== window.top) return
   if ((location.hash || '').replace(/^#/, '')) return
   if (!connection.nicknameSet) return
   startAppTutorial({
@@ -354,18 +305,6 @@ const maybeStartTutorial = () => {
 <template>
   <!-- Boot: esperamos al getIdentity() inicial antes de decidir qué pintar. -->
   <div v-if="booting" class="login-cta"><div class="login-card"><p>{{ t.boot.loading }}</p></div></div>
-
-  <!-- Overlay sin identidad: no permitimos crear cuenta aquí (storage
-       particionado por el site visitado). En su lugar, CTA al messenger real. -->
-  <div v-else-if="!connection.nicknameSet && isReadOnlyEmbed" class="login-cta">
-    <div class="login-card">
-      <img class="login-logo" src="/icons/icon-192.png" alt="Dotrino" />
-      <h2>{{ t.login.title }}</h2>
-      <p v-if="blockedByInsecureTop">{{ t.login.insecure }}</p>
-      <p v-else>{{ t.login.intro }}</p>
-      <button class="btn primary-cta" @click="openMessengerTab">{{ t.login.button }}</button>
-    </div>
-  </div>
 
   <NicknameModal v-else-if="!connection.nicknameSet" @set="handleNicknameSet" />
 
@@ -387,7 +326,6 @@ const maybeStartTutorial = () => {
       icon="/icons/icon-192.png"
       brand-href="./"
       :lang.attr="lang"
-      :no-back="embedInIframe ? '' : null"
       profile
       support-href="https://ko-fi.com/dotrino"
       support-repo="imdotrino/dotrino-messenger"
@@ -488,7 +426,6 @@ const maybeStartTutorial = () => {
   text-align: center;
   max-width: 340px;
 }
-.login-logo { width: 56px; height: 56px; margin-bottom: 14px; }
 .login-card h2 { margin: 0 0 8px; font-family: var(--font-headline); font-size: 20px; }
 .login-card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .login-card .btn { width: 100%; }

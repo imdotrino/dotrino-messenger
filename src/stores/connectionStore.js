@@ -4,14 +4,6 @@ import { getWebSocketProxyClient } from '@dotrino/proxy-client'
 import { getIdentity } from '../services/identity'
 import { key as accountKey } from '../services/account'
 import { sanitizeNickname } from '../utils/sanitize'
-import { relayProxyCall, watchOutboundQueue } from '../services/proxyRelay'
-
-const URL_EMBED = new URLSearchParams(typeof location !== 'undefined' ? location.search : '').get('embed')
-// Solo overlay (FAB en sites HTTPS) usa relay: una pestaña con FAB activo
-// cada una abriendo conexión al proxy = spam → ban. Popup pineado y direct
-// tab abren su propia conexión normal.
-const IS_RELAY_MODE = URL_EMBED === 'overlay'
-const IS_OFFSCREEN = URL_EMBED === 'offscreen'
 
 export const useConnectionStore = defineStore('connection', () => {
   const wsProxyClient = getWebSocketProxyClient()
@@ -63,10 +55,8 @@ export const useConnectionStore = defineStore('connection', () => {
   const setNickname = (name, opts = {}) => {
     nickname.value = sanitizeNickname((name || '').trim())
     localStorage.setItem(NICK_KEY, nickname.value)
-    // También guardarlo en la vault, así viaja con `id.exportIdentity()` y
-    // los overlays particionados pueden recuperarlo del bridge. Si el caller
-    // pasa `{ writeToVault: false }` (p.ej. el placeholder derivado del
-    // pubkey en overlay) saltamos esto para no contaminar el vault.
+    // También guardarlo en la vault, así viaja con `id.exportIdentity()`. Si el
+    // caller pasa `{ writeToVault: false }` saltamos esto para no contaminarla.
     if (nickname.value && opts.writeToVault !== false) {
       getIdentity().then(id => id?.setMyNickname?.(nickname.value)).catch(() => {})
     }
@@ -76,12 +66,6 @@ export const useConnectionStore = defineStore('connection', () => {
   const queuedDelivered = ref(0)
 
   const connect = async () => {
-    if (IS_RELAY_MODE) {
-      // Overlay: no abre WebSocket; los sends salen vía cc-outbound-v1.
-      isConnected.value = true
-      console.log('[cc-conn] overlay → relay mode (no direct WebSocket)')
-      return
-    }
     try {
       connectionError.value = null
       await ready  // directorio + auto-selección del mejor nodo (si no hay home fijo)
@@ -148,7 +132,6 @@ export const useConnectionStore = defineStore('connection', () => {
     if (!/^wss?:\/\//.test(u) || u === wsUrl.value) return
     wsUrl.value = u
     if (persist) localStorage.setItem('messenger_proxy_url', u)
-    if (IS_RELAY_MODE) return
     disconnect()
     await connect()
   }
@@ -201,7 +184,7 @@ export const useConnectionStore = defineStore('connection', () => {
   // mejor nodo sano (reputación local + latencia), temporal.
   let failingOver = false
   const attemptFailover = async () => {
-    if (failingOver || IS_RELAY_MODE) return
+    if (failingOver) return
     failingOver = true
     try {
       recordFail(wsUrl.value)
@@ -220,20 +203,14 @@ export const useConnectionStore = defineStore('connection', () => {
   // `connect()` espera esto para usar el proxio elegido.
   const ready = (async () => {
     await loadNodeDirectory()
-    if (!IS_RELAY_MODE && !localStorage.getItem('messenger_proxy_url')) {
+    if (!localStorage.getItem('messenger_proxy_url')) {
       const best = await pickBestProxy()
       if (best) { wsUrl.value = best; console.log('[cc-conn] auto-selected:', best) }
     }
   })()
 
-  // Overlay: encola en chrome.storage.local para que el offscreen procese.
-  // Resto: usa wsProxyClient directo.
-  const sendMessage = IS_RELAY_MODE
-    ? (toTokens, raw) => relayProxyCall('send', [toTokens, raw])
-    : (toTokens, raw) => wsProxyClient.send(toTokens, raw)
-  const sendByPubkey = IS_RELAY_MODE
-    ? (toPubkeys, raw) => relayProxyCall('sendByPubkey', [toPubkeys, raw])
-    : (toPubkeys, raw) => wsProxyClient.sendByPubkey(toPubkeys, raw)
+  const sendMessage = (toTokens, raw) => wsProxyClient.send(toTokens, raw)
+  const sendByPubkey = (toPubkeys, raw) => wsProxyClient.sendByPubkey(toPubkeys, raw)
 
   // ── El código corto que se comparte ("pásame tu pin") ──────────────────
   //
@@ -246,7 +223,6 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const refreshPairingCode = async () => {
     if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = null }
-    if (IS_RELAY_MODE) return
     try {
       const res = await wsProxyClient.requestPairingCode()
       pairingCode.value = res?.code || null
@@ -271,7 +247,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   /**
    * Canjea la cita de otra persona.
-   * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'|'unavailable'}>}
+   * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'}>}
    *
    * El `reason` importa: «no hay red» y «ese código no vale» se arreglan de forma
    * distinta —una esperando, la otra pidiendo otro código— y decir la segunda
@@ -279,7 +255,6 @@ export const useConnectionStore = defineStore('connection', () => {
    * Se distingue por `e.code`, nunca por el texto del error (que se traduce).
    */
   const redeemPairingCode = async (code) => {
-    if (IS_RELAY_MODE) return { ok: false, reason: 'unavailable' }
     if (!(await waitConnected())) return { ok: false, reason: 'offline' }
     try {
       const res = await wsProxyClient.redeemPairingCode(code)
@@ -291,23 +266,6 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  // Solo el offscreen procesa la cola.
-  let queueWatcher = null
-  if (IS_OFFSCREEN) {
-    queueWatcher = watchOutboundQueue(async (item) => {
-      if (!isConnected.value) return false  // reintenta cuando estemos conectados
-      try {
-        if (item.method === 'send') wsProxyClient.send(...item.args)
-        else if (item.method === 'sendByPubkey') wsProxyClient.sendByPubkey(...item.args)
-        else { console.warn('relay: unknown method', item.method); return true }
-        return true
-      } catch (e) {
-        console.warn('relay: process failed:', e)
-        return false
-      }
-    })
-  }
-
   const setPresenceChannel = (name) => { presenceChannel.value = name }
 
   const setupHandlers = () => {
@@ -316,8 +274,6 @@ export const useConnectionStore = defineStore('connection', () => {
       isConnected.value = true
       connectionError.value = null
       recordOk(wsUrl.value)  // el nodo respondió → limpiar su penalización
-      // Re-procesar items deferidos en la cola al (re)conectar.
-      if (queueWatcher) queueWatcher.drain().catch(() => {})
       // Al (RE)conectar: (1) re-identificarse —activa la cola offline propia y la
       // reachability por pubkey; sin esto, tras un blip de WS dejabas de recibir—;
       // (2) reenviar el outbox: DMs que fallaron con el WS caído. Para un destinatario

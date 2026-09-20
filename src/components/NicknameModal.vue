@@ -6,9 +6,8 @@ const nick = ref('')
 const inputEl = ref(null)
 const valid = (v) => v.trim().length >= 3 && v.trim().length <= 20
 const submit = () => { if (valid(nick.value)) emit('set', nick.value.trim()) }
-// Foco programático en lugar de `autofocus`: Chrome bloquea autofocus en
-// iframes cross-origin (extensión, embed). Esto sí funciona si el iframe
-// tiene el foco, y si no, no rompe nada — solo no enfoca.
+// Foco programático en lugar de `autofocus`: Chrome lo bloquea en iframes
+// cross-origin. Esto sí funciona, y donde no, no rompe nada — solo no enfoca.
 onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
 </script>
 

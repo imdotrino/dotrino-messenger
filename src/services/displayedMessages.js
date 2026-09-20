@@ -1,66 +1,44 @@
-// Track which incoming DMs ya se mostraron como notificación centrada.
-// Persistido en `chrome.storage.local` vía el bridge para no repetir el toast
-// cuando el usuario cambia de pestaña (cada pestaña con FAB tiene su propio
-// messenger iframe — sin esto cada uno mostraría el mismo mensaje).
-//
-// Fallback a localStorage si el bridge no responde (pestaña directa sin
-// extensión).
+// Qué DMs entrantes ya se enseñaron como notificación centrada. Persistido en
+// localStorage, namespaceado por la cuenta activa: así un refresco no vuelve a
+// mostrar el mismo mensaje.
 
-import { kvGet, kvSet, onKvChanged } from './identityBridge'
 import { key as accountKey } from './account'
 
-// Funciones, no constantes: al importar el módulo la cuenta aún no está resuelta.
-const storageKey = () => accountKey('cc-displayed-msgs-v1')
+// Función, no constante: al importar el módulo la cuenta aún no está resuelta.
 const lsKey = () => accountKey('cc_displayed_msgs_v1')
 const MAX = 500
 
 let cache = new Set()
 let loaded = false
 
-async function ensureLoaded () {
+function ensureLoaded () {
   if (loaded) return
   loaded = true
-  try {
-    const remote = await kvGet(storageKey())
-    if (Array.isArray(remote)) {
-      cache = new Set(remote)
-      return
-    }
-  } catch (_) {}
   try {
     const local = JSON.parse(localStorage.getItem(lsKey()) || '[]')
     if (Array.isArray(local)) cache = new Set(local)
   } catch (_) {}
 }
 
-// Sincroniza ediciones desde otros contextos (otra pestaña marcó un mensaje).
-onKvChanged((key, value) => {
-  if (key !== storageKey() || !Array.isArray(value)) return
-  cache = new Set(value)
-})
-
 export async function isDisplayed (id) {
   if (!id) return true
-  await ensureLoaded()
+  ensureLoaded()
   return cache.has(id)
 }
 
 /**
  * Marca un id como mostrado. Idempotente. Devuelve `true` si era nuevo,
- * `false` si ya estaba (esto sirve para race conditions: dos pestañas que
- * intentan mostrar el mismo DM al mismo tiempo, solo el primero verá `true`).
+ * `false` si ya estaba.
  */
 export async function markDisplayed (id) {
   if (!id) return false
-  await ensureLoaded()
+  ensureLoaded()
   if (cache.has(id)) return false
   cache.add(id)
   // Cap el set para no crecer indefinido — keep most recent ids.
   let arr = [...cache]
   if (arr.length > MAX) arr = arr.slice(-MAX)
   cache = new Set(arr)
-  // Persistencia: bridge primero, fallback a localStorage.
-  try { await kvSet(storageKey(), arr) } catch (_) {}
   try { localStorage.setItem(lsKey(), JSON.stringify(arr)) } catch (_) {}
   return true
 }

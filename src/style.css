@@ -39,30 +39,6 @@
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
 
-/* Cuando la PWA se carga como iframe desde la extensión (popup, overlay,
-   offscreen), `?embed=...` añade `cc-embed` al <html>. En ese caso usamos
-   100% del iframe y compactamos espacios para evitar overflow en 360x540. */
-html.cc-embed, html.cc-embed body, html.cc-embed #app { height: 100%; min-height: 0; }
-/* Permitimos scroll vertical en .app dentro del iframe: si algún contenido
-   no entra (sidebar largo, modal, etc.), preferimos scroll antes que
-   recorte invisible. La conversación en sí mantiene su propio scroll
-   interno por .messages. */
-html.cc-embed .app { height: 100%; overflow-y: auto; overflow-x: hidden; }
-/* La marca y el icono viven en el shadow del <dotrino-topbar>: se compactan por
-   sus `part`s y su variable de padding, no por selectores de descendencia. */
-html.cc-embed .topbar { --dotrino-topbar-pad: 8px 12px; }
-html.cc-embed .topbar::part(brand-name) { display: none; }
-html.cc-embed .topbar::part(brand-icon) { width: 28px; height: 28px; }
-html.cc-embed .topbar .me { padding: 4px 8px; font-size: 12px; }
-html.cc-embed .topbar .me .tok { font-size: 11px; padding: 2px 6px; }
-html.cc-embed .side-head { padding: 10px 14px; }
-html.cc-embed .layout .sidebar { width: 100%; max-width: 100%; }
-html.cc-embed .layout { position: relative; }
-/* Modo móvil-like: una columna a la vez. */
-html.cc-embed .layout .sidebar { display: none; }
-html.cc-embed .layout .main-pane { display: flex; }
-html.cc-embed .layout.show-side .sidebar { display: flex; }
-html.cc-embed .layout.show-side .main-pane { display: none; }
 body {
   background: var(--bg-1);
   color: var(--text);
