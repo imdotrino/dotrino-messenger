@@ -9,6 +9,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// PUSH (FCM): el TIMBRE sin contenido que el proxio toca cuando te encolan un mensaje con la app
+// cerrada. Necesita app/google-services.json (gitignoreado, del proyecto Firebase `dotrino-app`);
+// sin él la app compila y funciona igual, solo que sin timbre (PushService lo comprueba).
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
 // `dotrino-env` pone en el entorno ANDROID_UPLOAD_KEYSTORE_B64 / _STORE_PASSWORD / _KEY_ALIAS /
 // _KEY_PASSWORD (cajón `claude`, con aprobación en el teléfono). El .jks se escribe en
 // $XDG_RUNTIME_DIR —memoria, no disco— y se borra al salir la JVM; `--no-daemon` hace que esa
@@ -75,6 +80,8 @@ android {
 dependencies {
     implementation("com.dotrino:dotrino-native")   // includeBuild de ../native/android
     implementation("com.dotrino:dotrino-webrtc")   // el camino directo (escalones 2 y 3)
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

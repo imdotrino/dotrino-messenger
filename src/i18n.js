@@ -171,6 +171,8 @@ export const messages = {
       notifRequest: '{name} quiere agregarte',
       sealFailed: 'No se pudo cifrar el mensaje para esta persona: {reason}',
       requests: 'Solicitudes',
+      pushTitle: 'Tienes mensajes nuevos',
+      pushBody: 'Abre el messenger para leerlos.',
     },
   },
 
@@ -304,6 +306,8 @@ export const messages = {
       notifRequest: '{name} wants to add you',
       sealFailed: 'The message could not be encrypted for this person: {reason}',
       requests: 'Requests',
+      pushTitle: 'You have new messages',
+      pushBody: 'Open the messenger to read them.',
     },
   },
 }

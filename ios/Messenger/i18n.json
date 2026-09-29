@@ -97,7 +97,9 @@
   "native.notifChannel": "Mensajes",
   "native.notifRequest": "{name} quiere agregarte",
   "native.sealFailed": "No se pudo cifrar el mensaje para esta persona: {reason}",
-  "native.requests": "Solicitudes"
+  "native.requests": "Solicitudes",
+  "native.pushTitle": "Tienes mensajes nuevos",
+  "native.pushBody": "Abre el messenger para leerlos."
  },
  "en": {
   "boot.loading": "Loading…",
@@ -197,6 +199,8 @@
   "native.notifChannel": "Messages",
   "native.notifRequest": "{name} wants to add you",
   "native.sealFailed": "The message could not be encrypted for this person: {reason}",
-  "native.requests": "Requests"
+  "native.requests": "Requests",
+  "native.pushTitle": "You have new messages",
+  "native.pushBody": "Open the messenger to read them."
  }
 }

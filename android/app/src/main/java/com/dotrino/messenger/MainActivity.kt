@@ -114,6 +114,7 @@ class MainActivity : Activity() {
                 e.onChange = { rerenderSoon() }
                 // The bar again, now with the profile (its button shows the account in use).
                 setContentView(shell())
+                PushService.register(this@MainActivity)
                 e.onNotice = { n -> ui.post { onNotice(n) } }
                 Messenger.session?.onStatus { ui.post { renderStatus() } }
                 if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

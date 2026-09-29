@@ -19,3 +19,4 @@ ios/build
 ios/Messenger/Info.plist
 ios/Messenger/Messenger.entitlements
 ios/Messenger.xcodeproj
+android/app/google-services.json
