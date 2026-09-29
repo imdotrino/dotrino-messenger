@@ -10,13 +10,14 @@ struct RootView: View {
     @ObservedObject private var lang = DotrinoLang.shared
     @State private var addOpen = false
     @State private var incomingCode: String?
+    @State private var addTab = "add"
 
     var body: some View {
         VStack(spacing: 0) {
             DotrinoTopbar(repo: "imdotrino/dotrino-messenger", brand: .init(name: "Messenger", image: Image("Brand")),
                           profile: m.profileKey.map { .init(name: m.nickname, key: $0) }) {
                 if let code = m.code {
-                    Button(code) { UIPasteboard.general.string = code }
+                    Button(code) { incomingCode = nil; addTab = "mine"; addOpen = true }
                         .font(.system(.footnote, design: .monospaced).bold()).foregroundColor(Palette.text)
                         .padding(.horizontal, 10).padding(.vertical, 6).background(Capsule().fill(Palette.card2))
                         .accessibilityLabel(t("topbar.copyCode")).accessibilityIdentifier("my-code")
@@ -34,7 +35,7 @@ struct RootView: View {
             // The QR link (https://messenger.dotrino.com/#add=CODE) opens with the code in place.
             if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = AddSheet.normalize(String(f[r.upperBound...])); addOpen = true }
         }
-        .sheet(isPresented: $addOpen) { AddSheet(m: m, initial: incomingCode ?? "").environmentObject(lang) }
+        .sheet(isPresented: $addOpen, onDismiss: { addTab = "add" }) { AddSheet(m: m, initial: incomingCode ?? "", tab: addTab).environmentObject(lang) }
         .id(lang.code)
     }
 
@@ -261,7 +262,8 @@ struct AddSheet: View {
     @State private var photo: PhotosPickerItem?
     @Environment(\.dismiss) private var dismiss
 
-    init(m: AppModel, initial: String) { self.m = m; _code = State(initialValue: initial) }
+    /// [tab] "mine" = straight to «My code» (the chip of the bar: to show mine, not type theirs).
+    init(m: AppModel, initial: String, tab: String = "add") { self.m = m; _code = State(initialValue: initial); _tab = State(initialValue: tab) }
 
     private static let confusables: [Character: Character] = ["I": "1", "L": "1", "S": "5", "Z": "2", "B": "8", "G": "6", "0": "O"]
     static func normalize(_ raw: String) -> String {

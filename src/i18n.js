@@ -54,8 +54,7 @@ export const messages = {
 
     topbar: {
       bell: 'Notificaciones y solicitudes',
-      copyCode: 'Tu código para que te agreguen — tócalo para copiarlo',
-      copied: '✓ Copiado',
+      copyCode: 'Tu código para que te agreguen — tócalo para verlo con su QR',
     },
 
     sidebar: { title: 'Contactos', add: 'Añadir contacto' },
@@ -193,8 +192,7 @@ export const messages = {
 
     topbar: {
       bell: 'Notifications and requests',
-      copyCode: 'Your code for people to add you — tap to copy',
-      copied: '✓ Copied',
+      copyCode: 'Your code for people to add you — tap to see it with its QR',
     },
 
     sidebar: { title: 'Contacts', add: 'Add contact' },

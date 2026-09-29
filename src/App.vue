@@ -118,17 +118,10 @@ const escucharVault = (id) => {
 
 // Lo que se enseña acá es el CÓDIGO de emparejamiento (6 caracteres, un solo uso,
 // caduca a los minutos y se renueva solo). NO la instancia: son 34 caracteres, es
-// la dirección de ruteo del proxio y no hay forma de dictarla. Tocarlo lo copia.
-const codeCopied = ref(false)
-let codeCopiedTimer = null
-const copyMyCode = async () => {
-  const code = connection.pairingCode
-  if (!code) return
-  try { await navigator.clipboard.writeText(code) } catch { return }
-  codeCopied.value = true
-  clearTimeout(codeCopiedTimer)
-  codeCopiedTimer = setTimeout(() => { codeCopied.value = false }, 1500)
-}
+// la dirección de ruteo del proxio y no hay forma de dictarla. Tocarlo abre «Añadir
+// contacto» en la pestaña «Mi código», con el QR y el botón de copiar.
+const addTab = ref('add')
+const openMyCode = () => { addTab.value = 'mine'; showAdd.value = true }
 
 // Panel de notificaciones = Web Component compartido <dotrino-notifications>.
 const bindNotif = (el) => { if (el) el.controller = getNotifications() }
@@ -343,8 +336,8 @@ const maybeStartTutorial = () => {
             class="tok"
             data-testid="my-code"
             :title="t.topbar.copyCode"
-            @click="copyMyCode"
-          >{{ codeCopied ? t.topbar.copied : connection.pairingCode }}</button>
+            @click="openMyCode"
+          >{{ connection.pairingCode }}</button>
         </div>
         <button class="bell-btn" data-testid="bell" @click="showNotif = true" :title="t.topbar.bell">
           🔔
@@ -394,7 +387,7 @@ const maybeStartTutorial = () => {
       </section>
     </main>
 
-    <AddContactModal v-if="showAdd" :code="pendingCode" @close="showAdd = false; pendingCode = ''" />
+    <AddContactModal v-if="showAdd" :code="pendingCode" :initial-tab="addTab" @close="showAdd = false; pendingCode = ''; addTab = 'add'" />
     <RatingModal v-if="ratingFor" :pubkey="ratingFor" @close="ratingFor = null" />
     <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal :lang.attr="lang" @cc-notif-close="showNotif = false"></dotrino-notifications>
 

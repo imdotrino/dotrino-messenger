@@ -18,10 +18,10 @@ import com.dotrino.sdk.ui.DotrinoQr
  * pasted or scanned) and an optional alias → a contact REQUEST. MY CODE: mine, and its QR (a
  * link, so a phone's camera opens the messenger with the code in place).
  */
-class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code: String?, private val scan: () -> Unit) {
+class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code: String?, private val scan: () -> Unit, startTab: String = "add") {
     val dialog: Dialog
     private val body: LinearLayout
-    private var tab = "add"
+    private var tab = startTab
     private val input = a.field(t("add.phToken")).apply { tag = "code-input"; setText(code ?: ""); typeface = android.graphics.Typeface.MONOSPACE; gravity = Gravity.CENTER }
     private val alias = a.field(t("add.phAlias")).apply { tag = "alias-input" }
     private val error = a.label("", 14f, a.col(R.color.m_danger)).apply { visibility = View.GONE; tag = "add-error" }

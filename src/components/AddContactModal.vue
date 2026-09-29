@@ -11,13 +11,15 @@ import '@dotrino/qr'
 // `code`: llega con el enlace `#add=…` (alguien escaneó el QR con la cámara del
 // sistema). Se deja escrito para que el usuario vea qué va a hacer y ponga alias,
 // en vez de mandar un saludo a ciegas.
-const props = defineProps({ code: { type: String, default: '' } })
+// `initialTab`: 'mine' cuando se llega tocando el código de la barra (se quiere enseñar el
+// propio, no teclear el de otro).
+const props = defineProps({ code: { type: String, default: '' }, initialTab: { type: String, default: 'add' } })
 const emit = defineEmits(['close'])
 const connection = useConnectionStore()
 const contacts = useContactsStore()
 const threads = useThreadsStore()
 
-const tab = ref('add')   // 'add' | 'mine'
+const tab = ref(props.initialTab === 'mine' ? 'mine' : 'add')   // 'add' | 'mine'
 const tokenInput = ref(props.code || '')
 const nicknameInput = ref('')
 // Guardamos la CLAVE del error, no el texto ya traducido: así el mensaje sigue al

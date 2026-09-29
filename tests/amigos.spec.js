@@ -120,6 +120,25 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
   }
 })
 
+test('tocar el código de la barra abre «Mi código» con el mismo código y su QR', async () => {
+  test.setTimeout(120_000)
+  const browser = await chromium.launch()
+  const ana = await entrar(browser, `Ana${marca}C`)
+  try {
+    const codigo = await codigoDe(ana)
+    await ana.page.getByTestId('my-code').click()
+    await expect(ana.page.getByTestId('my-pairing-code')).toHaveText(codigo, { timeout: ESPERA })
+    await expect(ana.page.getByTestId('my-qr')).toBeVisible()
+    // Y el «+» sigue abriendo la pestaña de agregar por código.
+    await ana.page.getByTestId('close-add').click()
+    await ana.page.getByTestId('add-contact').click()
+    await expect(ana.page.getByTestId('code-input')).toBeVisible()
+  } finally {
+    await ana.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
 test('una amiga entra escaneando el QR del otro', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()

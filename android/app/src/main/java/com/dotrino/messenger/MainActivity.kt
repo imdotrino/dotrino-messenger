@@ -161,7 +161,7 @@ class MainActivity : Activity() {
             tag = "my-code"; contentDescription = t("topbar.copyCode")
             typeface = android.graphics.Typeface.MONOSPACE
             background = rounded(col(R.color.m_card2), px(14)); setPadding(px(10), px(6), px(10), px(6))
-            setOnClickListener { copyCode() }
+            setOnClickListener { openAdd(null, mine = true) }
         }
         codeChip = code
         val p = Messenger.profile
@@ -172,13 +172,6 @@ class MainActivity : Activity() {
     }
 
     private var codeChip: TextView? = null
-
-    private fun copyCode() {
-        val c = engine?.pairingCode ?: return
-        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("code", c))
-        codeChip?.text = t("topbar.copied")
-        ui.postDelayed({ renderStatus() }, 1500)
-    }
 
     private fun renderStatus() {
         val e = engine
@@ -335,11 +328,12 @@ class MainActivity : Activity() {
 
     private fun closeConversation() { open = null; engine?.active = null; render() }
 
-    private fun openAdd(code: String?) {
+    /** «Add contact»; [mine] = straight to «My code» (the chip of the bar: to show mine, not type theirs). */
+    private fun openAdd(code: String?, mine: Boolean = false) {
         val e = engine ?: return
         pendingCode = null
         addSheet?.first?.dismiss()
-        val s = AddSheet(this, e, code, ::openScanner)
+        val s = AddSheet(this, e, code, ::openScanner, if (mine) "mine" else "add")
         addSheet = s.dialog to s
         s.dialog.setOnDismissListener { if (addSheet?.second === s) addSheet = null }
         s.dialog.show()
