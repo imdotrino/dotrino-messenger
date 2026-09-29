@@ -445,7 +445,7 @@ actor MessengerEngine {
     private func onRatingQuery(_ m: SealedSession.Message, _ c: JSON) async {
         guard let subject = m.payload["subject"]?.string, let qid = m.payload["queryId"]?.string, let pk = c["publickey"]?.string else { return }
         try? peers.recordQuery(asker: pk, subject: subject)
-        let r = (try? peers.ratingsFor(subject)) ?? (nil, [])
+        let r: (mine: JSON?, endorsements: [JSON]) = (try? peers.ratingsFor(subject)) ?? (nil, [])
         try? await sendToContact(pk, ["type": "RATING_REPLY", "queryId": .string(qid), "subject": .string(subject), "mine": r.mine ?? .null, "endorsements": .array(r.endorsements)])
     }
 
