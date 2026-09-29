@@ -9,3 +9,10 @@ playwright-report/
 test-results/
 build
 .env
+
+android/.gradle
+android/.kotlin
+android/local.properties
+android/app/build
+android/build
+ios/build

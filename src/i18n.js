@@ -102,7 +102,7 @@ export const messages = {
       errOwn: 'Ese es tu propio código.',
       errOffline: 'Todavía no hay conexión. Espera un momento y vuelve a intentarlo.',
       errNoCode: 'Ese QR no lleva ningún código de contacto.',
-      errSend: 'No se pudo enviar el saludo.',
+      errSend: 'No se pudo enviar la solicitud.',
     },
 
     list: {
@@ -118,7 +118,7 @@ export const messages = {
     conv: {
       // Aviso de versiones (§14). En llano: se nombra la app, no el «protocolo».
       compat: {
-        incompatible: 'Esta persona usa una versión del messenger que no encaja con la tuya. Puede que los mensajes no le lleguen. Si podéis, actualizad los dos a la última.',
+        incompatible: 'Esta persona usa una versión del messenger que no encaja con la tuya. Puede que los mensajes no le lleguen. Si pueden, actualicen los dos a la última.',
         unknown: 'No se sabe qué versión del messenger usa esta persona: es anterior a la que lo dice. Si algo no llega, esa es la primera pista.'
       },
       back: 'Volver',
@@ -149,6 +149,29 @@ export const messages = {
     },
 
     incoming: { newMessage: 'Mensaje nuevo' },
+
+    // Solo en las apps NATIVAS (iOS y Android, CONVENCIONES §16): la PWA va delante y es la
+    // fuente única de los textos, así que lo que solo existe allí también vive aquí.
+    native: {
+      welcomeInfo: 'Tu identidad vive en este teléfono. La llave que te identifica nunca sale de él.',
+      noProfile: 'Este teléfono todavía no tiene una cuenta de Dotrino. Créala en la app «Identidad Dotrino» y vuelve aquí.',
+      needsSigner: 'Este teléfono no firma por tu cuenta, así que no puede enviar mensajes a tu nombre.',
+      connecting: 'Conectando…',
+      offline: 'Sin conexión: tus mensajes esperan y salen solos al volver.',
+      scanTitle: 'Escanea su QR',
+      cameraDenied: 'La app no tiene permiso para usar la cámara. Puedes elegir una foto del QR.',
+      pickPhoto: 'Elegir una foto',
+      rateTitle: 'Calificar a {name}',
+      rateTrust: 'Confianza',
+      rateAffinity: 'Afinidad',
+      rateSave: 'Guardar',
+      rateSaved: 'Calificación guardada',
+      rateFailed: 'No se pudo guardar la calificación: {reason}',
+      notifChannel: 'Mensajes',
+      notifRequest: '{name} quiere agregarte',
+      sealFailed: 'No se pudo cifrar el mensaje para esta persona: {reason}',
+      requests: 'Solicitudes',
+    },
   },
 
   en: {
@@ -215,7 +238,7 @@ export const messages = {
       errOwn: 'That is your own code.',
       errOffline: 'There is no connection yet. Wait a moment and try again.',
       errNoCode: 'That QR does not carry a contact code.',
-      errSend: 'The hello could not be sent.',
+      errSend: 'The request could not be sent.',
     },
 
     list: {
@@ -261,5 +284,26 @@ export const messages = {
     },
 
     incoming: { newMessage: 'New message' },
+
+    native: {
+      welcomeInfo: 'Your identity lives on this phone. The key that identifies you never leaves it.',
+      noProfile: 'This phone has no Dotrino account yet. Create it in the «Dotrino Identity» app and come back.',
+      needsSigner: 'This phone does not sign for your account, so it cannot send messages in your name.',
+      connecting: 'Connecting…',
+      offline: 'Offline: your messages wait and go out on their own when you are back.',
+      scanTitle: 'Scan their QR',
+      cameraDenied: 'The app has no permission to use the camera. You can pick a photo of the QR.',
+      pickPhoto: 'Pick a photo',
+      rateTitle: 'Rate {name}',
+      rateTrust: 'Trust',
+      rateAffinity: 'Affinity',
+      rateSave: 'Save',
+      rateSaved: 'Rating saved',
+      rateFailed: 'The rating could not be saved: {reason}',
+      notifChannel: 'Messages',
+      notifRequest: '{name} wants to add you',
+      sealFailed: 'The message could not be encrypted for this person: {reason}',
+      requests: 'Requests',
+    },
   },
 }
