@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
+  "dotrino": {
+    "platforms": [
+      "pwa",
+      "ios",
+      "android"
+    ]
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

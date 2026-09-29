@@ -23,7 +23,13 @@ El eje del ecosistema **[Dotrino](https://dotrino.com)** es el **autohosteo** y 
 
 ---
 
-App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino): la **PWA** (`src/`), desplegada en `messenger.dotrino.com`.
+App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino), en tres versiones (CONVENCIONES §16): la **PWA** (`src/`, en `messenger.dotrino.com`, va delante), **Android** (`android/`, Kotlin con vistas nativas) e **iOS** (`ios/`, SwiftUI). Las nativas usan [`dotrino-native`](https://github.com/imdotrino/dotrino-native) (submódulo `native/`): mismo protocolo sellado, mismo libro de contactos del perfil, el historial respaldado en la bóveda y reconciliado con el de la PWA, QR, camino directo por WebRTC y calificaciones. Los textos nativos salen de `src/i18n.js` (`node scripts/native-i18n.mjs`).
+
+```sh
+cd android && dotrino-env run --ns claude -- ./gradlew --no-daemon :app:assembleRelease   # firmada con la llave de la app de identidad
+cd android && ./gradlew :app:testDebugUnitTest                                            # el motor, con dos motores reales y sellado real
+cd ios && xcodegen generate && xcodebuild -project Messenger.xcodeproj -scheme Messenger test
+```
 
 > La **extensión de Chrome** que enseñaba el messenger encima de cualquier página vive ahora en su propio repo, [`dotrino-messenger-extension`](https://github.com/imdotrino/dotrino-messenger-extension), porque es otro producto: se instala aparte, se revisa aparte y tiene su propia promesa.
 
