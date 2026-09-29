@@ -1,4 +1,5 @@
 import DotrinoNative
+import DotrinoNativeUI
 import DotrinoNativeWebRTC
 import Foundation
 import UserNotifications
@@ -31,6 +32,15 @@ final class AppModel: ObservableObject {
     @Published var compat: [String: String] = [:]
     @Published var profileKey: String?
     @Published var nickname: String?
+
+    /// The APNs token arrives at the app delegate, whenever Apple gives it: kept here and handed
+    /// to the session that is running (or to the next one), which registers it with the proxy.
+    private static weak var current: AppModel?
+    private static var lastPush: SealedSession.PushToken?
+    static func pushToken(_ t: SealedSession.PushToken) {
+        lastPush = t
+        current?.session?.setPushToken(t)
+    }
 
     private(set) var engine: MessengerEngine?
     private var session: SealedSession?
@@ -75,7 +85,9 @@ final class AppModel: ObservableObject {
             if backup != nil {
                 Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
             }
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            Self.current = self
+            if let t = Self.lastPush { s.setPushToken(t) }
+            DotrinoPush.register()
             await refresh()
         } catch let e as Profile.ProfileError {
             problem = t("native.noProfile") + (e.code == "no-profile" ? "" : " (\(e.code))")

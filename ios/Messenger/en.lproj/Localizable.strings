@@ -1,0 +1,3 @@
+/* Generado por scripts/native-i18n.mjs desde src/i18n.js: no se edita a mano. */
+"DOTRINO_RING_TITLE" = "You have new messages";
+"DOTRINO_RING_BODY" = "Open the messenger to read them.";
