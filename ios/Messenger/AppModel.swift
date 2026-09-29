@@ -35,6 +35,20 @@ final class AppModel: ObservableObject {
     private(set) var engine: MessengerEngine?
     private var session: SealedSession?
     private var refreshQueued = false
+    private var backup: VaultBackup?
+    private var backupTask: Task<Void, Never>?
+
+    /// Reconcile with the vault in [delay] seconds (a moment after a write, or now).
+    func syncSoon(_ delay: Double) {
+        guard let backup else { return }
+        backupTask?.cancel()
+        backupTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            do { if !(try await backup.sync()).changed.isEmpty { await self?.refresh() } }
+            catch { print("messenger: vault backup failed:", error) }
+        }
+    }
 
     func boot() async {
         if engine != nil { return }
@@ -46,7 +60,11 @@ final class AppModel: ObservableObject {
             let account = (p.pid ?? "default").lowercased().replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
             let store = try DotrinoStore(app: "messenger-" + account)
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
-            let e = MessengerEngine(transport: s, profile: p, peers: peers, threads: MessengerThreads(store), kv: DefaultsKv(account: account),
+            // THE BACKUP IN THE VAULT (when paired): the history reaches the PWA of the same
+            // account and back. Only the messenger's threads: the contacts' keys.
+            if p.vault != nil { backup = VaultBackup(profile: p, store: store, owns: { $0.hasPrefix("{") }) }
+            let threads = MessengerThreads(store) { [weak self] in Task { @MainActor in self?.syncSoon(1.5) } }
+            let e = MessengerEngine(transport: s, profile: p, peers: peers, threads: threads, kv: DefaultsKv(account: account),
                                     version: version, reputation: Reputation(profile: p, peers: peers))
             await e.setHandlers(onChange: { [weak self] in Task { @MainActor in self?.refreshSoon() } },
                                 onNotice: { n in Task { @MainActor in AppModel.notify(n) } })
@@ -54,6 +72,9 @@ final class AppModel: ObservableObject {
             await e.start()
             s.start()
             engine = e; session = s; booted = true; profileKey = p.profileId
+            if backup != nil {
+                Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
+            }
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
             await refresh()
         } catch let e as Profile.ProfileError {

@@ -35,16 +35,15 @@ protocol Threads: AnyObject {
     func put(_ pubkey: String, _ entry: JSON)
 }
 
+/// The history in the app's store; thread keys are the contacts' keys, like the PWA's, so the
+/// vault backup reconciles them. [onWrite]: something was written (the backup uploads it soon).
 final class MessengerThreads: Threads {
     private let store: DotrinoStore
-    private let index = "messenger.threads"
-    init(_ store: DotrinoStore) { self.store = store }
+    private let onWrite: () -> Void
+    init(_ store: DotrinoStore, onWrite: @escaping () -> Void = {}) { self.store = store; self.onWrite = onWrite }
     func list(_ pubkey: String) -> [JSON] { (try? store.listThread(pubkey)) ?? [] }
-    func threads() -> [String] { ((try? store.listThread(index)) ?? []).compactMap { $0["id"]?.string } }
-    func put(_ pubkey: String, _ entry: JSON) {
-        try? store.appendMessage(pubkey, entry)
-        if !threads().contains(pubkey) { try? store.appendMessage(index, ["id": .string(pubkey)]) }
-    }
+    func threads() -> [String] { (try? store.threadKeys()) ?? [] }
+    func put(_ pubkey: String, _ entry: JSON) { try? store.appendMessage(pubkey, entry); onWrite() }
 }
 
 final class MemoryThreads: Threads {

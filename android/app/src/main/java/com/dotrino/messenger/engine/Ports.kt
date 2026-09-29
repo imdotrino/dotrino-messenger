@@ -51,15 +51,15 @@ interface Threads {
     fun put(pubkey: String, entry: JsonObject)
 }
 
-class StoreThreads(private val store: DotrinoStore) : Threads {
-    private val index = "messenger.threads"
+/**
+ * The history in the app's store. The thread keys are the contacts' keys, like the PWA's, so the
+ * vault backup reconciles them with what the PWA of the same account wrote. [onWrite]: something
+ * was written here (the backup uploads it a moment later).
+ */
+class MessengerThreads(private val store: DotrinoStore, private val onWrite: () -> Unit = {}) : Threads {
     override fun list(pubkey: String) = store.listThread(pubkey)
-    override fun threads(): List<String> = store.listThread(index).mapNotNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content }
-    override fun put(pubkey: String, entry: JsonObject) {
-        store.appendMessage(pubkey, entry)
-        // The index of threads (the store has no «list threads»): one entry per contact.
-        if (threads().none { it == pubkey }) store.appendMessage(index, JsonObject(mapOf("id" to kotlinx.serialization.json.JsonPrimitive(pubkey))))
-    }
+    override fun threads(): List<String> = store.threadKeys()
+    override fun put(pubkey: String, entry: JsonObject) { store.appendMessage(pubkey, entry); onWrite() }
 }
 
 class MemoryThreads : Threads {

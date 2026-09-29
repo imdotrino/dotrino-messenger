@@ -4,7 +4,14 @@ import android.content.Context
 import com.dotrino.messenger.engine.Kv
 import com.dotrino.messenger.engine.MessengerEngine
 import com.dotrino.messenger.engine.SessionTransport
-import com.dotrino.messenger.engine.StoreThreads
+import com.dotrino.messenger.engine.MessengerThreads
+import com.dotrino.sdk.VaultBackup
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.dotrino.sdk.DotrinoStore
 import com.dotrino.sdk.PhoneIdentity
 import com.dotrino.sdk.Profile
@@ -26,6 +33,11 @@ object Messenger {
     @Volatile var session: SealedSession? = null; private set
     @Volatile var profile: Profile? = null; private set
     private var identity: PhoneIdentity? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var backupJob: Job? = null
+
+    /** The backup's state, for the screen: null = not paired (nothing to say), else the last error. */
+    @Volatile var backupError: String? = null; private set
 
     /** Why it could not start: `no-identity-app`, `no-profile`, `no-profile-keys`, or a message. */
     class BootError(message: String, val code: String) : Exception(message)
@@ -45,11 +57,30 @@ object Messenger {
             override fun get(key: String) = prefs.getString(key, null)
             override fun set(key: String, value: String?) { prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
         }
+        val store = DotrinoStore(ctx, "messenger-" + (p.pid ?: "default").lowercase().replace(Regex("[^a-z0-9-]"), "-"))
+        // THE BACKUP IN THE VAULT (when this phone is paired): the history reaches the PWA of the
+        // same account and back. Only the messenger's threads: the contacts' keys.
+        val backup = p.vault?.let { VaultBackup(p, store) { k -> k.startsWith("{") } }
+        var engineRef: MessengerEngine? = null
+        fun syncSoon(wait: Long) {
+            if (backup == null) return
+            backupJob?.cancel()
+            backupJob = scope.launch {
+                delay(wait)
+                try {
+                    val r = backup.sync()
+                    backupError = null
+                    if (r.changed.isNotEmpty()) engineRef?.onChange?.invoke()
+                } catch (e: Exception) { backupError = (e as? VaultBackup.BackupError)?.code ?: e.message; android.util.Log.w("messenger", "vault backup", e) }
+            }
+        }
         val e = MessengerEngine(
             SessionTransport(s), p, peers,
-            StoreThreads(DotrinoStore(ctx, "messenger-" + (p.pid ?: "default").lowercase().replace(Regex("[^a-z0-9-]"), "-"))),
+            MessengerThreads(store) { syncSoon(1_500) },
             kv, BuildConfig.VERSION_NAME, Reputation(p, peers),
         )
+        engineRef = e
+        if (backup != null) scope.launch { while (true) { syncSoon(0); delay(5 * 60_000) } }
         e.onWarn = { w, t -> android.util.Log.w("messenger", w, t) }
         e.start()
         s.start()
