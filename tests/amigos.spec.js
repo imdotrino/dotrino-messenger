@@ -79,12 +79,17 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
     const codigoAna = await codigoDe(ana)
     expect(codigoAna, 'el código de la barra no tiene la forma esperada').toMatch(CODE_RE)
 
-    // 2) Beto la agrega con ese código y le manda el saludo.
+    // 2) Beto la agrega con ese código: le manda una SOLICITUD, no un mensaje.
     await beto.page.getByTestId('add-contact').click()
     await beto.page.getByTestId('code-input').fill(codigoAna)
     await beto.page.getByTestId('send-hello').click()
 
-    // 3) A Ana le llega la solicitud y la acepta.
+    // 3) A Ana le llega la solicitud. Es un mensaje de control entre los dos: en
+    //    ningún chat de Ana aparece nada, y nadie es contacto de nadie todavía.
+    await ana.page.getByTestId('accept-request').first().waitFor({ timeout: ESPERA })
+    await expect(ana.page.getByTestId('msg-in')).toHaveCount(0)
+    await expect(ana.page.getByTestId('contact-item')).toHaveCount(0)
+    await expect(beto.page.getByTestId('contact-item')).toHaveCount(0)
     await aceptarSolicitud(ana)
 
     // 4) El código es de un solo uso: en cuanto alguien lo gasta, la barra tiene
@@ -93,10 +98,10 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
       { timeout: ESPERA, message: 'el código gastado se quedó en pantalla' })
       .not.toBe(codigoAna)
 
-    // 5) Ida y vuelta de mensajes. Se abre la conversación en LOS DOS lados antes de
-    //    escribir: un mensaje que llega antes de que el contacto esté guardado va a
-    //    la bandeja de solicitudes, y entonces esto probaría otra cosa.
+    // 5) Beto la ve en sus contactos cuando ella acepta (no antes), y se escriben.
+    //    Ningún chat empezó con un mensaje de la solicitud.
     await abrirConversacion(ana)
+    await expect(ana.page.getByTestId('msg-in')).toHaveCount(0)
     const deBeto = `hola ana, soy beto ${marca}`
     await abrirConversacion(beto)
     await escribir(beto, deBeto)

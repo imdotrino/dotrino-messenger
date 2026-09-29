@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getWebSocketProxyClient } from '@dotrino/proxy-client'
+import { getWebSocketProxyClient, identitySealing } from '@dotrino/proxy-client'
 import { getIdentity } from '../services/identity'
 import { key as accountKey } from '../services/account'
 import { sanitizeNickname } from '../utils/sanitize'
@@ -69,7 +69,21 @@ export const useConnectionStore = defineStore('connection', () => {
     try {
       connectionError.value = null
       await ready  // directorio + auto-selección del mejor nodo (si no hay home fijo)
-      wsProxyClient.updateConfig({ url: wsUrl.value })
+      // TODO VA SELLADO (CONVENCIONES §4.1): el proxio no cifra lo que enruta. La llave
+      // privada de cifrado vive en la bóveda, así que sellar y abrir se le delegan a ella
+      // (`identitySealing`). Sin identidad no hay con qué sellar, y NO se habla en claro:
+      // se para y se dice.
+      // La bóveda es un iframe y a veces tarda en contestar al arrancar (5 s de tope por
+      // intento): se insiste unas veces antes de decir que no está.
+      let id = null
+      for (let i = 0; i < 4 && !id; i++) id = await getIdentity()
+      if (!id) throw Object.assign(new Error('identity vault unreachable: nothing can be sealed'), { code: 'no-identity' })
+      wsProxyClient.updateConfig({
+        url: wsUrl.value,
+        requireSealed: true,
+        myEncPub: await id.getEncryptionPubkey(),
+        sealing: identitySealing(id, { app: 'messenger' })
+      })
       if (!handlersSetup) { setupHandlers(); handlersSetup = true }
       const assigned = await wsProxyClient.connect()
       if (assigned && !token.value) token.value = assigned
@@ -209,8 +223,17 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   })()
 
-  const sendMessage = (toTokens, raw) => wsProxyClient.send(toTokens, raw)
-  const sendByPubkey = (toPubkeys, raw) => wsProxyClient.sendByPubkey(toPubkeys, raw)
+  // Lo único que sale de aquí va SELLADO. Por token (lo único que sube a WebRTC) o por
+  // pubkey (cola offline de 24 h). La llave del otro la averigua y verifica el pilar si
+  // no se la damos.
+  const sendSealedTo = (token, payload, opts = {}) => wsProxyClient.sendSealedTo(token, payload, opts)
+  /** @param {string} pubkey @param {any} payload @param {{ peerEncPub?: string, quiet?: boolean }} [opts] */
+  const sendSealed = (pubkey, payload, { peerEncPub, quiet } = {}) =>
+    wsProxyClient.sendSealed([pubkey], payload, { ...(peerEncPub ? { peerEncPub } : {}), ...(quiet ? { quiet: true } : {}) })
+  /** La llave de cifrado de una identidad, VERIFICADA contra su firma. Lanza con `code`. */
+  const encPubOf = (pubkey) => wsProxyClient.encPubOf(pubkey)
+  /** De quién es este token, según su saludo del transporte (no autentica). */
+  const pubkeyOfToken = (token) => wsProxyClient.pubkeyOfToken(token)
 
   // ── El código corto que se comparte ("pásame tu pin") ──────────────────
   //
@@ -266,6 +289,29 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
+  /**
+   * DE QUIÉN ES ESTE TOKEN. Canjear un código da la dirección (la instancia) pero no dice de
+   * quién es, y sin eso no hay a quién sellarle. Se pregunta con el saludo del transporte:
+   * la otra punta contesta con su pubkey. No autentica, y no hace falta — lo que se le
+   * mande va sellado a la llave que ESA identidad anunció firmada, así que quien mintiera
+   * en el saludo no podría abrirlo.
+   * @returns {Promise<string|null>} la pubkey, o null si no contestó a tiempo
+   */
+  const whoIs = async (token, ms = 10000) => {
+    const known = wsProxyClient.pubkeyOfToken(token)
+    if (known) return known
+    const t0 = Date.now()
+    // `helloTo` exige estar identificado: el saludo sin identidad no dice nada.
+    while (!wsProxyClient.myPublickey && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 150))
+    if (!wsProxyClient.myPublickey) return null
+    return new Promise((resolve) => {
+      const done = (pk) => { off(); clearTimeout(timer); resolve(pk) }
+      const off = wsProxyClient.on('peer_identity', (t, pk) => { if (t === token) done(pk) })
+      const timer = setTimeout(() => done(null), Math.max(1000, ms - (Date.now() - t0)))
+      wsProxyClient.helloTo(token)
+    })
+  }
+
   const setPresenceChannel = (name) => { presenceChannel.value = name }
 
   const setupHandlers = () => {
@@ -289,8 +335,7 @@ export const useConnectionStore = defineStore('connection', () => {
       console.error('WS error:', err)
     })
     wsProxyClient.on('message', (fromToken, payload, meta) => {
-      const raw = typeof payload === 'string' ? payload : JSON.stringify(payload)
-      import('./threadsStore.js').then(m => m.useThreadsStore().handleIncoming(fromToken, raw, meta || {})).catch(() => {})
+      import('./threadsStore.js').then(m => m.useThreadsStore().handleIncoming(fromToken, payload, meta || {})).catch(() => {})
     })
     wsProxyClient.on('peer_disconnected', (peerToken) => {
       import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
@@ -303,7 +348,7 @@ export const useConnectionStore = defineStore('connection', () => {
     token, pairingCode, refreshPairingCode, redeemPairingCode, waitConnected,
     isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
     myPublickey, queuedDelivered,
-    connect, disconnect, sendMessage, sendByPubkey, setNickname, setPresenceChannel, wsProxyClient,
+    connect, disconnect, sendSealedTo, sendSealed, encPubOf, pubkeyOfToken, whoIs, setNickname, setPresenceChannel, wsProxyClient,
     KNOWN_PROXIES, setProxyUrl,
     identifyWithVault
   }

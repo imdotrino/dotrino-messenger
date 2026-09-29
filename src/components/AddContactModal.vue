@@ -96,20 +96,20 @@ const submit = async () => {
       errorKey.value = res?.reason === 'offline' ? 'errOffline' : 'errInvalid'
       return
     }
-    const tk = res.instance
-    // Recordamos el apodo elegido para aplicarlo cuando el peer responda al
-    // handshake y se promueva a contacto (antes el campo se ignoraba).
-    threads.rememberAlias(tk, (nicknameInput.value || '').trim())
-    await threads.sendHello(tk)
-    // Challenge con nonce REGISTRADO por el vault (makeChallenge). Antes se
-    // mandaba un nonce 'probe-' a mano que el vault no reconocía → la respuesta
-    // del peer se rechazaba (isFreshNonce) y el contacto no se agregaba nunca.
-    await threads.sendChallenge(tk)
+    // Una SOLICITUD, no un saludo al chat: le llega a su bandeja y nadie es contacto de
+    // nadie hasta que acepte. Va sellada a la identidad que dijo el código.
+    const pubkey = res.publickey || await connection.whoIs(res.instance)
+    if (!pubkey) { errorKey.value = 'errOffline'; return }
+    await threads.sendContactRequest({
+      token: res.instance,
+      pubkey,
+      alias: (nicknameInput.value || '').trim()
+    })
     emit('close')
   } catch (e) {
     // El mensaje crudo de la excepción es jerga técnica (§9.1) y no se puede
     // traducir: al usuario le damos el texto llano y el detalle va a la consola.
-    console.warn('[cc-add-contact] sendHello failed', e)
+    console.warn('[cc-add-contact] contact request failed', e?.code || '', e?.message)
     errorKey.value = 'errSend'
   } finally {
     enviando.value = false

@@ -134,7 +134,7 @@ const copyMyCode = async () => {
 const bindNotif = (el) => { if (el) el.controller = getNotifications() }
 
 // Cantidad de solicitudes pendientes — para el badge de la campana.
-const requestCount = computed(() => threads.requests.requests.length)
+const requestCount = computed(() => threads.requests.incoming.length)
 
 // Pitido corto (WebAudio, sin assets) al notificar, si el usuario lo dejó on.
 const playBeep = () => {
@@ -211,12 +211,12 @@ onMounted(async () => {
   if (connection.nicknameSet) usarCodigoEntrante()
 })
 
-// Avisamos a todos los contactos por pubkey: si están conectados el proxy
-// les entrega ya, si no queda en cola 24h. Su HELLO de respuesta marcará
+// Avisamos a todos los contactos: si están conectados les llega ya, si no queda en cola
+// (sin tocar su timbre: la presencia puede esperar). Su saludo de respuesta marcará
 // presencia (markOnline) y la UI deja de decir "offline".
 const announceToKnown = async () => {
   for (const c of contacts.contacts) {
-    threads.sendHelloByPubkey(c.publickey)
+    threads.sendHelloTo(c.publickey)
   }
 }
 

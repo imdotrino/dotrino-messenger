@@ -5,6 +5,7 @@ import { getIdentity } from '../services/identity'
 import { sanitizeNickname } from '../utils/sanitize'
 import { computeDerivedRating, buildTrustMap } from '../utils/rating'
 import { getReputation } from '../services/reputation'
+import { samePubkey } from '@dotrino/proxy-client'
 
 /**
  * Contacts live in the shared identity vault (id.dotrino.com) since v0.6.0,
@@ -73,6 +74,26 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   const findByPubkey = (pubkey) => contacts.value.find(c => c.publickey === pubkey)
+  const same = (a, b) => { try { return !!a && !!b && samePubkey(a, b) } catch (_) { return false } }
+  /**
+   * La tarjeta de perfil de un contacto (sus aparatos). El vault la guarda en el registro
+   * de su `profileId`, que puede no ser la pubkey con la que lo agregaste.
+   */
+  const cardOf = (pubkey) => {
+    const p = peerFor(pubkey)
+    if (p?.card) return p.card
+    if (p?.profileId) return peerFor(p.profileId)?.card || null
+    return peers.value.find(x => x.card?.keys?.some(k => same(k.pub, pubkey)))?.card || null
+  }
+  /**
+   * El contacto que escribe, aunque lo haga desde OTRO de sus aparatos: la pubkey que
+   * llega es la del aparato, y su tarjeta dice que es suyo.
+   */
+  const findBySender = (pubkey) => {
+    const direct = contacts.value.find(c => same(c.publickey, pubkey))
+    if (direct) return direct
+    return contacts.value.find(c => cardOf(c.publickey)?.keys?.some(k => same(k.pub, pubkey))) || null
+  }
   const findByToken  = (token)  => contacts.value.find(c => c.lastToken === token)
   const peerFor      = (pubkey) => peers.value.find(p => p.publickey === pubkey) || null
 
@@ -152,7 +173,7 @@ export const useContactsStore = defineStore('contacts', () => {
     peers, contacts, ratingTick, onlineMap,
     refresh, refreshPeers,
     addContact, updateContact, removeContact,
-    findByPubkey, findByToken, peerFor,
+    findByPubkey, findByToken, findBySender, cardOf, peerFor,
     markOnline, markOffline, isOnline, tokenFor, liveTokenFor,
     ratePeer, ratingFor, myRatingFor, cloudReputationFor, myIndicatorsFor
   }

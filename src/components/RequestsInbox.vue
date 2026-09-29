@@ -5,14 +5,19 @@ import { t } from '../i18n'
 
 const threads = useThreadsStore()
 
-// Avaladas (cerca de tu red) arriba; el resto, desconocidos, debajo.
+// Las que te llegan: avaladas (cerca de tu red) arriba; el resto, desconocidos, debajo.
 const list = computed(() =>
-  [...threads.requests.requests].sort((a, b) => (b.vouched - a.vouched) || (b.ts - a.ts))
+  [...threads.requests.incoming].sort((a, b) => (b.vouched - a.vouched) || (b.ts - a.ts))
+)
+// Las que mandaste, esperando a que acepten.
+const sent = computed(() =>
+  threads.requests.requests.filter(r => r.dir === 'out').sort((a, b) => b.ts - a.ts)
 )
 
 const short = (pk) => (pk || '').slice(0, 8) + '…'
 const accept = (pk) => threads.acceptRequest(pk)
-const dismiss = (pk) => threads.dismissRequest(pk)
+const dismiss = (pk) => threads.dismissRequest(pk, 'in')
+const cancel = (pk) => threads.dismissRequest(pk, 'out')
 </script>
 
 <template>
@@ -27,11 +32,22 @@ const dismiss = (pk) => threads.dismissRequest(pk)
             <span v-if="r.vouched" class="vouch" :title="t.requests.vouchedTitle">{{ t.requests.vouched }}</span>
             <span v-else class="stranger" :title="t.requests.strangerTitle">{{ t.requests.stranger }}</span>
           </div>
-          <div class="req-msg">{{ r.text || t.requests.defaultMsg }}</div>
+          <div class="req-msg">{{ t.requests.defaultMsg }}</div>
         </div>
         <div class="req-actions">
           <button class="ok" data-testid="accept-request" @click="accept(r.pubkey)" :title="t.requests.accept">✓</button>
           <button class="no" data-testid="dismiss-request" @click="dismiss(r.pubkey)" :title="t.requests.dismiss">✕</button>
+        </div>
+      </li>
+    </ul>
+    <ul v-if="sent.length" class="req-list sent">
+      <li v-for="r in sent" :key="'out-' + r.pubkey" class="req" data-testid="sent-request">
+        <div class="req-info">
+          <div class="req-name">{{ r.nickname || short(r.pubkey) }}</div>
+          <div class="req-msg">{{ t.requests.waiting }}</div>
+        </div>
+        <div class="req-actions">
+          <button class="no" data-testid="cancel-request" @click="cancel(r.pubkey)" :title="t.requests.cancel">✕</button>
         </div>
       </li>
     </ul>

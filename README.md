@@ -30,7 +30,8 @@ App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino): l
 ## PWA
 
 - **Identidad compartida** con `id.dotrino.com` (mismas claves entre chat / chess / messenger).
-- **Mensajes E2E** cifrados con ECDH P-256 + AES-256-GCM (vía `Identity.encrypt/decrypt`).
+- **Todo va sellado por el transporte** (`@dotrino/proxy-client` ≥ 0.25, `requireSealed`, CONVENCIONES §4.1): el proxio no ve ni el tipo de mensaje ni su contenido, tampoco el saludo. Sellar y abrir se delegan en la bóveda (`identitySealing`), y el sobre llega a todos los aparatos del contacto por su tarjeta de perfil. Quién escribió lo dice la llave que selló (`meta.senderEncPub`), comprobada contra la del contacto o la que su identidad anunció firmada.
+- **Solicitudes de contacto = mensajes de control** (protocolo 2): canjear el código de otra persona le manda `CONTACT_REQUEST` a su bandeja; nadie es contacto de nadie hasta que acepta (`CONTACT_ACCEPT`). Ningún mensaje de la solicitud entra a un chat, y lo que mande alguien que no es tu contacto se descarta.
 - **Transporte WebRTC-first** con fallback al proxy (`@dotrino/proxy-client` ≥ 0.4): los DMs viajan por `RTCDataChannel` entre peers cuando ambos están online (señalización por el propio proxy, STUN-only). Si el DataChannel aún no abrió o el peer está offline, cae automáticamente al proxy WS (con cola de 24h cuando el destinatario no está conectado). El switch token-vs-pubkey en `sendDM` decide la ruta: token conocido → `send([token])` (WebRTC eligible), sin token → `sendByPubkey([pubkey])` (cola offline).
 - **Contactos compartidos** en el vault.
 - **Histórico compartido** en `store.dotrino.com` — visible desde la web y desde futuras apps en el mismo navegador. Con **cache local resiliente** (`localStorage.messenger_threads_cache_v1`): los hilos se hidratan al instante en cada refresh y los mensajes recibidos durante un bache del store remoto (cert caído, vault bloqueado, timeout) sobreviven al reload.

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { samePubkey } from '@dotrino/proxy-client'
 import { useConnectionStore } from './connectionStore'
 import { useContactsStore } from './contactsStore'
 import { useRequestsStore } from './requestsStore'
@@ -7,27 +8,16 @@ import { shouldNotifyKind } from '../services/notifications'
 import { getIdentity } from '../services/identity'
 import { getStore, onVaultChanged } from '../services/store'
 import { getReputation } from '../services/reputation'
-import { sanitizeMessage } from '../utils/sanitize'
+import { sanitizeMessage, sanitizeNickname } from '../utils/sanitize'
 import { key as accountKey } from '../services/account'
 import { MINE as MI_VERSION, revisar } from '../services/compat'
 
-// Peers que nos saludaron (HELLO) pero NO son contactos: guardamos su
-// encryptionPubkey para poder descifrar su DM y rutearlo a Solicitudes. En
-// memoria, esta sesión (las solicitudes durables viven en requestsStore).
-const pendingPeers = new Map()    // pubkey -> { encryptionPubkey, token, nickname }
-const pendingByToken = new Map()  // token  -> pubkey
-// Tokens a los que ya respondimos un HELLO esta sesión. Evita la "tormenta de
-// HELLO": handleHello respondía con sendHello a CADA HELLO recibido, y como un
-// HELLO de respuesta es a su vez un HELLO, dos contactos online entraban en
-// ping-pong infinito. Respondiendo ≤1 vez por token remoto el loop no se
-// sostiene (aunque el otro lado sea una versión vieja que siga haciendo eco).
-// Los tokens son efímeros por conexión: una reconexión trae token nuevo → re-saludo.
+// Contactos a los que ya contestamos el saludo esta sesión (por token). Evita la
+// "tormenta de HELLO": un saludo de respuesta es a su vez un saludo, y dos contactos en
+// línea entraban en ping-pong. Los tokens son de una conexión: al reconectar, se re-saluda.
 const greetedTokens = new Set()
-// Apodo elegido al agregar por token (AddContactModal): token -> nickname. Se
-// aplica al promover el peer a contacto tras el handshake.
-const pendingAliasByToken = new Map()
 
-// "Avalado por tu red": alguien en quien confiás (directo/transitivo) tiene una
+// "Avalado por tu red": alguien en quien confías (directo/transitivo) tiene una
 // atestación sobre este pubkey. Si sí → la solicitud notifica; si no → silenciosa.
 async function isVouched (pubkey) {
   try {
@@ -79,14 +69,23 @@ function mergeThreads (local, remote) {
  * Thread entry shape: { id, dir: 'in'|'out', text, ts, pending?: boolean }
  * Threads are keyed by contact pubkey.
  *
- * Wire protocol (string format `TYPE|json`):
- *   HELLO            { nickname, encryptionPubkey, pubkey, v, card? }
- *   IDENTIFY_CHALLENGE { nonce }
- *   IDENTIFY_RESPONSE  { nonce, signature, publickey, encryptionPubkey }
- *   DM_ENC           { envelope, ts }      payload encrypted with id.encrypt
- *   DM_ACK           { id }
- *   RATING_QUERY     { envelope }            { queryId, subject } cifrado
- *   RATING_REPLY     { envelope }            { queryId, subject, mine, endorsements } cifrado
+ * WIRE PROTOCOL (protocol 2). Every message is an object SEALED by the transport pillar
+ * (`requireSealed`, CONVENCIONES §4.1): the proxy sees neither the type nor the content.
+ * Nothing goes in the clear, not even the greeting.
+ *
+ *   CONTACT_REQUEST { nickname, v, card? }   "I want to add you" — goes to the other side's
+ *                                            requests inbox, NEVER to a chat
+ *   CONTACT_ACCEPT  { nickname, v, card? }   "accepted" — only counts if I asked first
+ *   HELLO           { nickname, v, card? }   presence between contacts (token + nickname)
+ *   DM              { text, ts, mid }        a chat message — only from a contact
+ *   DM_ACK          { id }
+ *   RATING_QUERY    { queryId, subject }
+ *   RATING_REPLY    { queryId, subject, mine, endorsements }
+ *
+ * WHO WROTE IT is said by the key that sealed it (`meta.senderEncPub`): only the holder of
+ * that private key could build the envelope. It is checked against the contact's known
+ * keys, or against the encryption key that identity announced SIGNED (`encPubOf`). The
+ * token says nothing and the transport greeting does not authenticate.
  */
 export const useThreadsStore = defineStore('threads', () => {
   const connection = useConnectionStore()
@@ -94,26 +93,21 @@ export const useThreadsStore = defineStore('threads', () => {
   const requests = useRequestsStore()
 
   // Dispara la notificación in-app (App.vue observa lastIncomingDM) respetando
-  // las preferencias del panel compartido. `kind`: 'message' | 'request' | 'hello'.
+  // las preferencias del panel compartido. `kind`: 'message' | 'hello'.
   const notify = (kind, dm, vouched = false) => {
     if (!shouldNotifyKind(kind, vouched)) return
     lastIncomingDM.value = dm
   }
 
-  // Apodo recordado al "Enviar saludo" desde AddContactModal.
-  const rememberAlias = (token, nickname) => {
-    if (token && nickname) pendingAliasByToken.set(token, nickname)
-  }
-
   const threads = ref(loadLocalCache())   // hidratación inmediata desde cache local
   const ACTIVE_KEY = accountKey('messenger_active_pubkey_v1')
   const activePubkey = ref(localStorage.getItem(ACTIVE_KEY) || null)
-  const outbox = ref([])        // messages waiting for recipient to come online
+  const outbox = ref([])        // messages that could not leave yet (no connection)
   // Último DM entrante decodificado, para que App.vue muestre la notificación
   // centrada cuando llegue uno nuevo.
   const lastIncomingDM = ref(null)
   // pubkey -> 'incompatible' | 'unknown'. Lo que dijo su saludo (§14).
-  const peerCompat = ref({})
+  const peerCompat = ref(/** @type {Record<string, string>} */ ({}))
 
   const activeThread = computed(() => activePubkey.value ? (threads.value[activePubkey.value] || []) : [])
   const activeContact = computed(() => activePubkey.value ? contacts.findByPubkey(activePubkey.value) : null)
@@ -209,24 +203,44 @@ export const useThreadsStore = defineStore('threads', () => {
     activePubkey.value = pubkey
     if (pubkey) {
       localStorage.setItem(ACTIVE_KEY, pubkey)
-      tryHandshake(pubkey)
+      sendHelloTo(pubkey)
       markThreadRead(pubkey).catch(() => {})
     } else {
       localStorage.removeItem(ACTIVE_KEY)
     }
   }
 
-  const formatMessage = (type, payload) => `${type}|${JSON.stringify(payload)}`
-  const parseMessage = (raw) => {
-    const i = raw.indexOf('|')
-    if (i < 0) return { type: null, payload: null }
-    try { return { type: raw.slice(0, i), payload: JSON.parse(raw.slice(i + 1)) } }
-    catch { return { type: null, payload: null } }
+  // ------------------------------------------------------------------------
+  // Sending: everything sealed, by the most direct road the pillar has
+  // ------------------------------------------------------------------------
+
+  /**
+   * Seal `payload` to a contact. With a live token it goes by token (the only road that
+   * can go up to WebRTC); without one, by pubkey (the proxy's 24 h offline queue).
+   * `quiet`: queue it without ringing their phone (presence can wait).
+   */
+  const sendToContact = async (pubkey, payload, { quiet = false } = {}) => {
+    const c = contacts.findByPubkey(pubkey)
+    if (!c) throw Object.assign(new Error('not a contact'), { code: 'not-contact' })
+    const peerEncPub = c.encryptionPubkey || undefined
+    const token = contacts.liveTokenFor(pubkey)
+    if (token) await connection.sendSealedTo(token, payload, { peerPubkey: pubkey, peerEncPub })
+    else await connection.sendSealed(pubkey, payload, { peerEncPub, quiet })
   }
 
-  // ------------------------------------------------------------------------
-  // Outbound: send DM
-  // ------------------------------------------------------------------------
+  const whoAmI = async () => {
+    const id = await getIdentity()
+    if (!id) return null
+    // TARJETA DE PERFIL: lo mínimo para que el otro pueda cifrarnos a TODOS nuestros
+    // dispositivos y no solo a este (perfil, versión y llaves de cifrado; sin etiquetas
+    // ni permisos). Ver dotrino-vault/docs/acta-de-perfil.md.
+    const card = await id.profileCard?.().catch(() => null)
+    return {
+      nickname: connection.nickname,
+      v: MI_VERSION,              // qué soy y qué versión corro (§14)
+      ...(card ? { card } : {})
+    }
+  }
 
   const sendDM = async (pubkey, text) => {
     const trimmed = sanitizeMessage(text)
@@ -236,386 +250,252 @@ export const useThreadsStore = defineStore('threads', () => {
 
     const entry = { id: crypto.randomUUID(), dir: 'out', text: trimmed, ts: Date.now(), pending: true }
     append(pubkey, entry)
+    await deliver({ pubkey, entryId: entry.id, text: trimmed, ts: entry.ts })
+  }
 
-    if (!contact.encryptionPubkey) {
-      // No conocemos su clave de cifrado todavía — queda en outbox local
-      // hasta completar el handshake.
-      outbox.value.push({ pubkey, entryId: entry.id, text: trimmed })
-      return
-    }
+  /** Sends one outgoing DM; if it cannot leave now, it stays in the outbox. */
+  const deliver = async (item) => {
     try {
-      const id = await getIdentity()
-      if (!id) throw new Error('identity vault unreachable')
-      // El proxy direcciona por pubkey: si está online, entrega al instante;
-      // si no, encola hasta 24h. El "token" del wrap puede ser cualquier
-      // identificador estable: usamos la pubkey del destinatario para que
-      // sea el mismo valor al cifrar y al descifrar (vault.decrypt usa
-      // myToken como key del wrap).
-      // `publickey` es lo que permite al vault expandir el sobre a TODOS los dispositivos
-      // de esa persona (si conocemos su tarjeta). `token` se mantiene por compatibilidad
-      // del sobre v1; el v2 se indexa por llave, no por conexión.
-      const envelope = await id.encrypt(
-        [{ publickey: pubkey, token: pubkey, encryptionPubkey: contact.encryptionPubkey }],
-        trimmed
-      )
-      const msg = formatMessage('DM_ENC', { envelope, ts: entry.ts, mid: entry.id })
-      // Solo rutamos por token si tenemos presencia CONFIRMADA en esta sesión
-      // (`liveTokenFor`). El `lastToken` persistido en vault puede ser de una
-      // sesión anterior y el proxy lo descartaría sin caer a cola offline,
-      // así que para esos casos usamos pubkey (cola offline 24h del proxy).
-      const token = contacts.liveTokenFor(pubkey)
-      if (token) await connection.sendMessage([token], msg)
-      else       await connection.sendByPubkey([pubkey], msg)
-      await updateEntry(pubkey, entry.id, { pending: false })
+      await sendToContact(item.pubkey, { type: 'DM', text: item.text, ts: item.ts, mid: item.entryId })
+      await updateEntry(item.pubkey, item.entryId, { pending: false })
+      return true
     } catch (e) {
-      console.warn('sendDM failed; will retry:', e)
-      outbox.value.push({ pubkey, entryId: entry.id, text: trimmed })
+      console.warn('[messenger] DM could not be sent, will retry:', e?.code || '', e?.message)
+      if (!outbox.value.some(x => x.entryId === item.entryId)) outbox.value.push(item)
+      return false
     }
   }
 
   const flushOutbox = async () => {
     if (outbox.value.length === 0) return
-    const remaining = []
-    for (const item of outbox.value) {
-      const c = contacts.findByPubkey(item.pubkey)
-      if (!c || !c.encryptionPubkey) { remaining.push(item); continue }
-      try {
-        const id = await getIdentity()
-        if (!id) { remaining.push(item); continue }
-        const envelope = await id.encrypt(
-          [{ publickey: item.pubkey, token: item.pubkey, encryptionPubkey: c.encryptionPubkey }],
-          item.text
-        )
-        const msg = formatMessage('DM_ENC', { envelope, ts: Date.now(), mid: item.entryId })
-        const token = contacts.liveTokenFor(item.pubkey)
-        if (token) await connection.sendMessage([token], msg)
-        else       await connection.sendByPubkey([item.pubkey], msg)
-        await updateEntry(item.pubkey, item.entryId, { pending: false })
-      } catch (err) {
-        console.warn('flush failed:', err)
-        remaining.push(item)
-      }
-    }
-    outbox.value = remaining
+    const pendientes = outbox.value
+    outbox.value = []
+    for (const item of pendientes) await deliver(item)
   }
 
-  // ------------------------------------------------------------------------
-  // Handshake — exchange identity + encryption pubkeys with a contact whose
-  // token we know is online.
-  // ------------------------------------------------------------------------
+  // ---- Greeting between contacts (presence) ------------------------------
 
-  const tryHandshake = async (pubkey) => {
-    const c = contacts.findByPubkey(pubkey)
-    if (!c) return
-    const token = contacts.liveTokenFor(pubkey)
-    // Si tenemos presencia confirmada esta sesión, vamos por challenge.
-    // Si no, mandamos un HELLO por pubkey: el proxy lo entregará al peer
-    // (instant si está conectado, queue offline si no). Cuando responda
-    // su HELLO, markOnline lo marcará como en línea en el UI.
-    if (token) {
-      try {
-        const id = await getIdentity()
-        if (!id) return
-        const { nonce } = await id.makeChallenge()
-        const msg = formatMessage('IDENTIFY_CHALLENGE', { nonce })
-        await connection.sendMessage([token], msg)
-      } catch (e) { console.warn('tryHandshake:', e) }
-    } else {
-      await sendHelloByPubkey(pubkey)
-    }
-  }
-
-  // Manda un IDENTIFY_CHALLENGE a un token cuyo pubkey aún no conocemos
-  // (alta por token). CRÍTICO: el nonce debe salir de `makeChallenge()` para
-  // que quede registrado (rememberNonce); si no, cuando el peer responda,
-  // `verifyResponse` lo rechaza por `isFreshNonce` y el contacto NUNCA se agrega.
-  const sendChallenge = async (token) => {
+  /** Say hello to a contact: by token if they are online, by pubkey (quietly) if not. */
+  const sendHelloTo = async (pubkey) => {
     try {
-      const id = await getIdentity()
-      if (!id) return
-      const { nonce } = await id.makeChallenge()
-      await connection.sendMessage([token], formatMessage('IDENTIFY_CHALLENGE', { nonce }))
-    } catch (e) { console.warn('sendChallenge:', e) }
+      const me = await whoAmI()
+      if (!me) return
+      await sendToContact(pubkey, { type: 'HELLO', ...me }, { quiet: true })
+    } catch (e) { console.warn('[messenger] hello failed:', e?.code || '', e?.message) }
   }
 
-  const buildHello = async () => {
-    const id = await getIdentity()
-    if (!id) return null
-    const pubkey = id.me?.publickey
-    if (!pubkey) return null
-    const encryptionPubkey = await id.getEncryptionPubkey()
-    // TARJETA DE PERFIL: lo mínimo para que el otro pueda cifrarnos a TODOS nuestros
-    // dispositivos y no solo a este (perfil, versión y llaves de cifrado; sin etiquetas
-    // ni permisos). Ver dotrino-vault/docs/acta-de-perfil.md.
-    const card = await id.profileCard?.().catch(() => null)
-    return formatMessage('HELLO', {
-      nickname: connection.nickname,
-      pubkey, encryptionPubkey,
-      v: MI_VERSION,              // qué soy y qué versión corro (§14)
-      ...(card ? { card } : {})
-    })
-  }
-
-  const sendHello = async (token) => {
-    try {
-      const msg = await buildHello()
-      if (!msg) return
-      await connection.sendMessage([token], msg)
-    } catch (e) { console.warn('sendHello:', e) }
-  }
-
-  // Pinga por pubkey: usado cuando no tenemos token vivo del peer pero
-  // queremos saber su presencia. El proxy ruta al token actual (si está
-  // identificado) o encola hasta 24h.
-  const sendHelloByPubkey = async (pubkey) => {
-    try {
-      const msg = await buildHello()
-      if (!msg) return
-      await connection.sendByPubkey([pubkey], msg)
-    } catch (e) { console.warn('sendHelloByPubkey:', e) }
-  }
-
-  // Responder un HELLO al peer, pero SOLO una vez por token (anti-tormenta de
-  // HELLO). El saludo proactivo (announceToKnown / handshake) NO pasa por acá:
-  // esto es exclusivamente el "eco" de respuesta dentro de handleHello.
-  const greetBack = (token) => {
+  // Reply to a greeting ONCE per token (anti-storm).
+  const greetBack = async (token, pubkey) => {
     if (!token || greetedTokens.has(token)) return
     greetedTokens.add(token)
-    sendHello(token)
+    await sendHelloTo(pubkey)
+  }
+
+  // ---- Contact requests ---------------------------------------------------
+
+  /**
+   * Ask someone to be a contact. The other side gets it in its REQUESTS INBOX; nothing
+   * reaches any chat, and nobody is a contact of anybody until they accept.
+   * `token` + `pubkey` come from redeeming their pairing code.
+   */
+  const sendContactRequest = async ({ token, pubkey, alias }) => {
+    if (!pubkey) throw Object.assign(new Error('the pairing code did not say whose it is'), { code: 'no-peer-identity' })
+    const me = await whoAmI()
+    if (!me) throw Object.assign(new Error('identity vault unreachable'), { code: 'no-identity' })
+    // If they already asked me, this is an acceptance: both sides want it.
+    if (requests.get(pubkey, 'in')) { await acceptRequest(pubkey); return }
+    const payload = { type: 'CONTACT_REQUEST', ...me }
+    if (token) await connection.sendSealedTo(token, payload, { peerPubkey: pubkey })
+    else await connection.sendSealed(pubkey, payload)
+    requests.upsert({ pubkey, dir: 'out', nickname: (alias || '').trim(), token: token || null, ts: Date.now() })
   }
 
   // ------------------------------------------------------------------------
-  // Inbound dispatch
+  // Inbound
   // ------------------------------------------------------------------------
 
-  const handleIncoming = async (fromToken, raw, meta = {}) => {
-    const { type, payload } = parseMessage(raw)
-    if (!type || !payload) return
-    switch (type) {
-      case 'HELLO':                return handleHello(fromToken, payload, meta)
-      case 'IDENTIFY_CHALLENGE':   return handleChallenge(fromToken, payload)
-      case 'IDENTIFY_RESPONSE':    return handleResponse(fromToken, payload)
-      case 'DM_ENC':               return handleDM(fromToken, payload, meta)
-      case 'DM_ACK':               return handleAck(fromToken, payload)
-      case 'RATING_QUERY':         return handleRatingQuery(fromToken, payload, meta)
-      case 'RATING_REPLY':         return handleRatingReply(fromToken, payload, meta)
+  const sameKey = (a, b) => { try { return !!a && !!b && samePubkey(a, b) } catch (_) { return false } }
+
+  /** Every encryption key I know for a contact: the one I saved, plus their profile card. */
+  const knownEncPubs = (c) => {
+    const out = []
+    if (c?.encryptionPubkey) out.push(c.encryptionPubkey)
+    const card = contacts.cardOf(c?.publickey)
+    for (const k of (card?.keys || [])) if (k.encPub) out.push(k.encPub)
+    return out
+  }
+
+  /**
+   * WHO SENT THIS. Their identity comes from the proxy (`fromPubkey`, when routed by key)
+   * or from the transport greeting (by token); it is TRUSTED only if the key that sealed
+   * the envelope belongs to that identity: one I already know for that contact, or the one
+   * that identity announced signed. Returns `{ pubkey, contact }` or null.
+   */
+  const authenticate = async (fromToken, meta) => {
+    const claimed = meta.fromPubkey || connection.pubkeyOfToken(fromToken)
+    const senderEncPub = meta.senderEncPub
+    if (!claimed || !senderEncPub) return null
+    const contact = contacts.findBySender(claimed)
+    if (contact && knownEncPubs(contact).some(k => sameKey(k, senderEncPub))) {
+      return { pubkey: contact.publickey, contact, encPub: senderEncPub }
+    }
+    let announced = null
+    try { announced = await connection.encPubOf(claimed) } catch (e) {
+      console.warn('[messenger] could not verify the sender key:', e?.code || '', e?.message)
+      return null
+    }
+    if (!sameKey(announced, senderEncPub)) {
+      console.warn('[messenger] message sealed with a key that is not the sender\'s — dropped')
+      return null
+    }
+    return { pubkey: contact?.publickey || claimed, contact: contact || null, encPub: senderEncPub }
+  }
+
+  const handleIncoming = async (fromToken, payload, meta = {}) => {
+    if (!payload || typeof payload !== 'object' || typeof payload.type !== 'string') return
+    // Lo que no llegó sellado ni se mira (el pilar ya lo descarta con requireSealed).
+    if (!meta.sealed) return
+    const who = await authenticate(fromToken, meta)
+    if (!who) return
+    switch (payload.type) {
+      case 'CONTACT_REQUEST': return handleContactRequest(fromToken, who, payload)
+      case 'CONTACT_ACCEPT':  return handleContactAccept(fromToken, who, payload)
+    }
+    // From here on, only contacts. A stranger's message goes nowhere — not to a chat,
+    // not to the inbox.
+    if (!who.contact) return
+    switch (payload.type) {
+      case 'HELLO':        return handleHello(fromToken, who.contact, payload)
+      case 'DM':           return handleDM(fromToken, who.contact, payload, meta)
+      case 'DM_ACK':       return handleAck(payload)
+      case 'RATING_QUERY': return handleRatingQuery(who.contact, payload)
+      case 'RATING_REPLY': return handleRatingReply(payload)
     }
   }
 
-  const handleHello = async (fromToken, payload) => {
-    if (!payload?.pubkey) return
+  /** Their version (§14) and their profile card, whatever the message that brings them. */
+  /** @param {string} pubkey @param {any} payload */
+  const noteProfile = async (pubkey, payload) => {
     // Qué versión corre el otro lado (§14). No bloquea: se anota y la conversación lo
     // enseña. Sin esto, hablarle a una versión que no entiende se ve como silencio.
     const desajuste = revisar(payload.v)
-    if (desajuste) peerCompat.value = { ...peerCompat.value, [payload.pubkey]: desajuste }
-    else if (peerCompat.value[payload.pubkey]) {
-      const { [payload.pubkey]: _fuera, ...resto } = peerCompat.value
+    if (desajuste) peerCompat.value = { ...peerCompat.value, [pubkey]: desajuste }
+    else if (peerCompat.value[pubkey]) {
+      const { [pubkey]: _fuera, ...resto } = peerCompat.value
       peerCompat.value = resto
     }
-    // Su tarjeta de perfil, si la manda: con ella podremos cifrarle a todos sus
-    // dispositivos. El vault la verifica y no acepta retrocesos ni cambios de master
-    // en silencio; si la rechaza, seguimos como siempre (cifrando solo a este aparato).
+    // Su tarjeta de perfil: con ella podremos cifrarle a todos sus dispositivos. El vault
+    // la verifica y no acepta retrocesos ni cambios de master en silencio.
     if (payload.card) {
       try {
         const id = await getIdentity()
         const r = await id?.adoptPeerCard?.(payload.card)
         if (r && !r.adopted && r.reason === 'master-cambiado') {
-          console.warn('[messenger] la tarjeta de %s la firma otro dispositivo: no se adopta sola', payload.pubkey.slice(0, 24))
+          console.warn('[messenger] the card of %s is signed by another device: not adopted silently', pubkey.slice(0, 24))
         }
       } catch (e) { console.warn('adoptPeerCard:', e?.message || e) }
     }
-    // If this pubkey is already a contact, refresh its presence + encryption key.
-    const existing = contacts.findByPubkey(payload.pubkey)
-    // Importante: hay que AWAIT antes de mandar el HELLO de vuelta. Si no,
-    // el otro lado recibe nuestro HELLO, manda DM_ENC, y cuando llega aquí
-    // el contacto aún no está persistido en el vault → "DM from unknown peer".
-    if (existing) {
-      await contacts.updateContact(payload.pubkey, {
-        lastToken: fromToken,
-        encryptionPubkey: payload.encryptionPubkey || existing.encryptionPubkey,
-        nickname: existing.nickname || payload.nickname
-      })
-      contacts.markOnline(payload.pubkey, fromToken)
-      flushOutbox()
-      greetBack(fromToken)
-    } else {
-      // Desconocido: NO se auto-agrega al vault. Guardamos su encryptionPubkey
-      // en memoria para poder descifrar su DM y rutearlo a Solicitudes. Le
-      // mandamos HELLO de vuelta (nuestra enc) para que pueda escribirnos —
-      // pero su mensaje irá a la bandeja, no a contactos.
-      pendingPeers.set(payload.pubkey, {
-        encryptionPubkey: payload.encryptionPubkey || null,
-        token: fromToken,
-        nickname: payload.nickname || ''
-      })
-      if (fromToken) pendingByToken.set(fromToken, payload.pubkey)
-      contacts.markOnline(payload.pubkey, fromToken)
-      greetBack(fromToken)
-      // Si alguien nuevo saluda es porque acaba de canjear tu código, y un código
-      // es de UN SOLO USO: el que se ve en pantalla ya está quemado. Se pide otro
-      // ahora, no dentro de cinco minutos, o el siguiente amigo teclea uno muerto.
-      connection.refreshPairingCode?.().catch?.(() => {})
-      // Alguien te está agregando: lo dejamos VISIBLE en Solicitudes aunque
-      // todavía no mande un mensaje (antes solo quedaba en memoria y no se veía
-      // nada). Idempotente por pubkey; si luego llega un DM, se actualiza el texto.
-      const vouched = await isVouched(payload.pubkey)
-      requests.upsert({
-        pubkey: payload.pubkey,
-        nickname: payload.nickname || '',
-        encryptionPubkey: payload.encryptionPubkey || null,
-        token: fromToken,
-        text: '',
-        ts: Date.now(),
-        vouched,
-        hello: true
-      })
-      notify('hello', {
-        id: 'hello-' + payload.pubkey,
-        fromPubkey: payload.pubkey,
-        fromNickname: payload.nickname || payload.pubkey.slice(0, 8),
-        text: '',
-        ts: Date.now(),
-        request: true,
-        hello: true
-      }, vouched)
-    }
   }
 
-  const handleChallenge = async (fromToken, payload) => {
-    const id = await getIdentity()
-    if (!id || !payload?.nonce) return
-    try {
-      const response = await id.signChallenge(payload.nonce)
-      const card = await id.profileCard?.().catch(() => null)
-      const msg = formatMessage('IDENTIFY_RESPONSE', { ...response, ...(card ? { card } : {}) })
-      await connection.sendMessage([fromToken], msg)
-      // also send a HELLO so they learn nickname
-      sendHello(fromToken)
-    } catch (e) { console.warn('signChallenge:', e) }
-  }
-
-  const handleResponse = async (fromToken, payload) => {
-    const id = await getIdentity()
-    if (!id || !payload?.publickey) return
-    try {
-      const result = await id.verifyResponse(payload)
-      if (!result.ok) return
-      if (payload.card) { try { await id.adoptPeerCard?.(payload.card) } catch (_) {} }
-      const pubkey = result.publickey
-      const encryptionPubkey = result.encryptionPubkey || payload.encryptionPubkey || null
-      // Promote to contact (or refresh if already there). Si lo agregamos por
-      // token, aplicamos el apodo elegido en el modal.
-      const alias = contacts.findByPubkey(pubkey)?.nickname || pendingAliasByToken.get(fromToken)
-      contacts.addContact({
-        pubkey, token: fromToken, encryptionPubkey,
-        nickname: alias
-      })
-      pendingAliasByToken.delete(fromToken)
-      // Ya es contacto: si había una solicitud pendiente suya (p.ej. de su
-      // HELLO), la quitamos de la bandeja para no dejar un duplicado.
-      requests.remove(pubkey)
-      contacts.markOnline(pubkey, fromToken)
-      contacts.refreshPeers()
-      flushOutbox()
-    } catch (e) { console.warn('verifyResponse:', e) }
-  }
-
-  const handleDM = async (fromToken, payload, meta = {}) => {
-    if (!payload?.envelope) return
-    // Resolver al remitente: si el proxy nos da `from_publickey` (caso de
-    // entrega offline o cualquier mensaje pubkey-direccionado) lo usamos
-    // directamente; si no, caemos a buscar por lastToken.
-    const findContact = () => {
-      let c = null
-      if (meta.fromPubkey) c = contacts.findByPubkey(meta.fromPubkey)
-      if (!c) c = contacts.contacts.find(x => x.lastToken === fromToken)
-      return c
-    }
-    let c = findContact()
-    // Si el HELLO viene en paralelo y aún no terminó, esperamos hasta 2s.
-    if (!c) {
-      for (let i = 0; i < 10; i++) {
-        await new Promise(r => setTimeout(r, 200))
-        c = findContact()
-        if (c?.encryptionPubkey) break
-      }
-    }
-    // Resolver pubkey + encryptionPubkey: de un contacto, o de un peer pendiente
-    // (HELLO recibido pero sin agregar). Los desconocidos NO se descartan: se
-    // descifran y van a Solicitudes.
-    const isContact = !!(c && c.encryptionPubkey)
-    const senderPubkey = c?.publickey || meta.fromPubkey || pendingByToken.get(fromToken) || null
-    let senderEnc = c?.encryptionPubkey || null
-    let senderNick = c?.nickname || ''
-    if (!isContact && senderPubkey) {
-      const pend = pendingPeers.get(senderPubkey)
-      if (pend?.encryptionPubkey) { senderEnc = pend.encryptionPubkey; senderNick = pend.nickname || senderNick }
-    }
-    if (!senderPubkey || !senderEnc) {
-      console.warn('DM from unknown peer', fromToken, meta.fromPubkey || '', '— dropping until handshake')
+  const handleContactRequest = async (fromToken, who, payload) => {
+    const nickname = sanitizeNickname(payload.nickname || '')
+    await noteProfile(who.pubkey, payload)
+    // Someone redeemed your code: a code is SINGLE USE, so the one on screen is burnt.
+    // Ask for another one now, or the next friend types a dead one.
+    connection.refreshPairingCode?.().catch?.(() => {})
+    contacts.markOnline(who.pubkey, fromToken)
+    // Already a contact (they reinstalled, lost us…): accept straight away.
+    // And if I had asked them too, both sides want it.
+    if (who.contact || requests.get(who.pubkey, 'out')) {
+      await becomeContacts(who.pubkey, { nickname, token: fromToken, encryptionPubkey: who.encPub })
+      await replyAccept(who.pubkey)
       return
     }
-    try {
-      const id = await getIdentity()
-      if (!id) return
-      // El wrap key es la pubkey del receptor (myPublickey). Si el sobre
-      // viene del flujo legacy por token, intentamos primero pubkey y luego
-      // token como fallback.
-      const myPub = connection.myPublickey
-      let result
-      try {
-        result = await id.decrypt(senderEnc, myPub, payload.envelope)
-      } catch (e1) {
-        try { result = await id.decrypt(senderEnc, connection.token, payload.envelope) }
-        catch (e2) { throw e1 }
-      }
-      // El vault devuelve { plaintext }, no un string directo.
-      const text = result?.plaintext ?? ''
-      const cleanText = sanitizeMessage(text)
-      const mid = payload.mid || crypto.randomUUID()
-      const ts = payload.ts || Date.now()
-
-      if (!isContact) {
-        // Desconocido → bandeja de Solicitudes. Notifica SOLO si está avalado por
-        // tu red (alguien en quien confiás tiene una atestación sobre él); si no,
-        // queda en silencio y se purga a las 24h.
-        const vouched = await isVouched(senderPubkey)
-        requests.upsert({ pubkey: senderPubkey, nickname: senderNick, encryptionPubkey: senderEnc, token: fromToken, text: cleanText, ts, vouched })
-        // Notifica según preferencias (por defecto TODAS las solicitudes; el
-        // panel deja apagar las de desconocidos). El aval solo cambia jerarquía.
-        notify('request', { id: mid, fromPubkey: senderPubkey, fromNickname: senderNick || senderPubkey.slice(0, 8), text: cleanText, ts, request: true, vouched }, vouched)
-      } else {
-        // Nace leído si su conversación está abierta y la ventana a la vista: si no,
-        // el contador subiría con el mensaje delante de los ojos del usuario.
-        const leido = activePubkey.value === senderPubkey &&
-          (typeof document === 'undefined' || document.visibilityState === 'visible')
-        const entry = { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(leido ? { _read: true } : {}) }
-        append(senderPubkey, entry)
-
-        // Notifica a la UI para mostrar la notificación centrada (App.vue
-        // observa `lastIncomingDM` y aplica el fade in/out + mark-as-displayed).
-        // Respeta la preferencia de mensajes de contactos del panel.
-        notify('message', {
-          id: mid,
-          fromPubkey: senderPubkey,
-          fromNickname: senderNick || senderPubkey.slice(0, 8),
-          text: cleanText,
-          ts
-        })
-      }
-      // Optional ack — si conocemos token actual, lo mandamos por token;
-      // si no, por pubkey (el ack también puede irse offline).
-      if (payload.mid) {
-        const ack = formatMessage('DM_ACK', { id: payload.mid })
-        const tk = contacts.tokenFor(senderPubkey) || fromToken
-        if (tk) await connection.sendMessage([tk], ack)
-        else    await connection.sendByPubkey([senderPubkey], ack)
-      }
-    } catch (e) { console.warn('decrypt failed:', e) }
+    const vouched = await isVouched(who.pubkey)
+    requests.upsert({
+      pubkey: who.pubkey, dir: 'in', nickname, token: fromToken,
+      encryptionPubkey: who.encPub, ts: Date.now(), vouched
+    })
+    notify('hello', {
+      id: 'request-' + who.pubkey,
+      fromPubkey: who.pubkey,
+      fromNickname: nickname || who.pubkey.slice(0, 8),
+      text: '',
+      ts: Date.now(),
+      request: true
+    }, vouched)
   }
 
-  const handleAck = async (fromToken, payload) => {
-    if (!payload?.id) return
+  const handleContactAccept = async (fromToken, who, payload) => {
+    // Only counts if I asked. Nobody adds themselves to my contacts.
+    const mine = requests.get(who.pubkey, 'out')
+    if (!mine && !who.contact) return
+    await noteProfile(who.pubkey, payload)
+    await becomeContacts(who.pubkey, {
+      nickname: mine?.nickname || sanitizeNickname(payload.nickname || ''),
+      token: fromToken,
+      encryptionPubkey: who.encPub
+    })
+    contacts.markOnline(who.pubkey, fromToken)
+  }
+
+  const becomeContacts = async (pubkey, { nickname, token, encryptionPubkey }) => {
+    const existing = contacts.findByPubkey(pubkey)
+    await contacts.addContact({
+      pubkey,
+      nickname: existing?.nickname || nickname || pubkey.slice(0, 8),
+      token: token || undefined,
+      encryptionPubkey: encryptionPubkey || existing?.encryptionPubkey,
+      notes: undefined
+    })
+    requests.remove(pubkey)
+    flushOutbox()
+  }
+
+  const replyAccept = async (pubkey) => {
+    const me = await whoAmI()
+    if (!me) return
+    await sendToContact(pubkey, { type: 'CONTACT_ACCEPT', ...me })
+  }
+
+  const handleHello = async (fromToken, contact, payload) => {
+    await noteProfile(contact.publickey, payload)
+    const patch = { lastToken: fromToken }
+    if (!contact.nickname && payload.nickname) patch.nickname = sanitizeNickname(payload.nickname)
+    await contacts.updateContact(contact.publickey, patch)
+    contacts.markOnline(contact.publickey, fromToken)
+    flushOutbox()
+    greetBack(fromToken, contact.publickey)
+  }
+
+  const handleDM = async (fromToken, contact, payload, meta = {}) => {
+    if (typeof payload.text !== 'string') return
+    const cleanText = sanitizeMessage(payload.text)
+    const mid = typeof payload.mid === 'string' ? payload.mid : crypto.randomUUID()
+    const ts = Number(payload.ts) || Date.now()
+    const pubkey = contact.publickey
+    // Nace leído si su conversación está abierta y la ventana a la vista: si no,
+    // el contador subiría con el mensaje delante de los ojos del usuario.
+    const leido = activePubkey.value === pubkey &&
+      (typeof document === 'undefined' || document.visibilityState === 'visible')
+    // El mismo mensaje puede llegar dos veces (cola offline + en vivo): una vez basta.
+    if (!(threads.value[pubkey] || []).some(e => e.id === mid)) {
+      append(pubkey, { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(leido ? { _read: true } : {}) })
+      notify('message', {
+        id: mid,
+        fromPubkey: pubkey,
+        fromNickname: contact.nickname || pubkey.slice(0, 8),
+        text: cleanText,
+        ts
+      })
+    }
+    if (fromToken) contacts.markOnline(pubkey, fromToken)
+    try { await sendToContact(pubkey, { type: 'DM_ACK', id: mid }, { quiet: true }) }
+    catch (e) { console.warn('[messenger] ack failed:', e?.code || '', e?.message) }
+  }
+
+  const handleAck = async (payload) => {
+    if (typeof payload.id !== 'string') return
     for (const [pk, arr] of Object.entries(threads.value)) {
       const e = arr.find(x => x.id === payload.id)
       if (e) { await updateEntry(pk, payload.id, { pending: false }); return }
@@ -624,82 +504,36 @@ export const useThreadsStore = defineStore('threads', () => {
 
   // ---- Ratings -----------------------------------------------------------
   //
-  // VAN CIFRADOS. El proxio no cifra nada de lo que enruta (CONVENCIONES §4.1), y
-  // estos mensajes son lo más delicado que manda el messenger después del propio
-  // texto: preguntan «¿qué sabes de FULANO?» y contestan con calificaciones. En claro,
-  // quien opere el nodo lee tu red de confianza entera — a quién conoces, de quién te
-  // fías y quién te pregunta por quién.
-  //
-  // Se usa el MISMO sobre del vault que el DM (`id.encrypt`), no una cripto propia: es
-  // la que el pilar ya expone y la que sabe abrirle a todos los dispositivos de esa
-  // persona. El HELLO y el desafío no pueden ir así, y no es un descuido: son
-  // justamente el intercambio que entrega la llave con la que se cifra.
-
-  /** Manda `type` cifrado a un contacto. Sin su llave de cifrado no se manda nada. */
-  const sendEnc = async (pubkey, type, payload) => {
-    const c = contacts.findByPubkey(pubkey)
-    if (!c?.encryptionPubkey) return false
-    const id = await getIdentity()
-    if (!id) return false
-    const envelope = await id.encrypt(
-      [{ publickey: pubkey, token: pubkey, encryptionPubkey: c.encryptionPubkey }],
-      JSON.stringify(payload)
-    )
-    const msg = formatMessage(type, { envelope })
-    const token = contacts.liveTokenFor(pubkey)
-    if (token) await connection.sendMessage([token], msg)
-    else       await connection.sendByPubkey([pubkey], msg)
-    return true
-  }
-
-  /** Abre un sobre que llega de `fromToken`/`meta.fromPubkey`. `null` si no se puede. */
-  const openEnc = async (fromToken, payload, meta = {}) => {
-    if (!payload?.envelope) return null
-    const c = (meta.fromPubkey && contacts.findByPubkey(meta.fromPubkey)) ||
-      contacts.contacts.find(x => x.lastToken === fromToken)
-    if (!c?.encryptionPubkey) return null
-    const id = await getIdentity()
-    if (!id) return null
-    try {
-      const r = await id.decrypt(c.encryptionPubkey, connection.myPublickey, payload.envelope)
-      return { from: c, data: JSON.parse(r?.plaintext ?? 'null') }
-    } catch (e) { console.warn('rating envelope could not be opened:', e?.message || e); return null }
-  }
+  // Preguntan «¿qué sabes de FULANO?» y contestan con calificaciones: lo más delicado
+  // que manda el messenger después del propio texto. Van sellados como todo lo demás.
 
   const askRatingsAbout = async (subjectPubkey) => {
-    const id = await getIdentity()
-    if (!id) return
     const queryId = crypto.randomUUID()
     for (const c of contacts.contacts) {
       if (c.publickey === subjectPubkey) continue
       if (!contacts.tokenFor(c.publickey)) continue
-      await sendEnc(c.publickey, 'RATING_QUERY', { queryId, subject: subjectPubkey })
+      await sendToContact(c.publickey, { type: 'RATING_QUERY', queryId, subject: subjectPubkey })
         .catch(e => console.warn('askRatingsAbout:', e?.message || e))
     }
   }
 
-  const handleRatingQuery = async (fromToken, payload, meta = {}) => {
+  const handleRatingQuery = async (contact, payload) => {
+    if (typeof payload.subject !== 'string' || typeof payload.queryId !== 'string') return
     const id = await getIdentity()
     if (!id) return
-    const abierto = await openEnc(fromToken, payload, meta)
-    // Sin sobre no se contesta. Quien pregunta es un contacto y un contacto tiene
-    // llave; si no la tiene, esto no viene de donde dice venir.
-    if (!abierto?.data?.subject || !abierto.data.queryId) return
     try {
-      await id.recordQuery(abierto.from.publickey, abierto.data.subject)
-      const { mine, endorsements } = await id.getRatingsForSubject(abierto.data.subject)
-      await sendEnc(abierto.from.publickey, 'RATING_REPLY', {
-        queryId: abierto.data.queryId, subject: abierto.data.subject, mine, endorsements
+      await id.recordQuery(contact.publickey, payload.subject)
+      const { mine, endorsements } = await id.getRatingsForSubject(payload.subject)
+      await sendToContact(contact.publickey, {
+        type: 'RATING_REPLY', queryId: payload.queryId, subject: payload.subject, mine, endorsements
       })
     } catch (e) { console.warn('handleRatingQuery:', e) }
   }
 
-  const handleRatingReply = async (fromToken, payload, meta = {}) => {
+  const handleRatingReply = async (data) => {
+    if (typeof data.subject !== 'string') return
     const id = await getIdentity()
     if (!id) return
-    const abierto = await openEnc(fromToken, payload, meta)
-    if (!abierto?.data?.subject) return
-    const data = abierto.data
     try {
       if (data.mine) await id.mergeEndorsements(data.subject, [data.mine])
       if (Array.isArray(data.endorsements) && data.endorsements.length) {
@@ -732,35 +566,28 @@ export const useThreadsStore = defineStore('threads', () => {
   // esto, un mensaje mandado desde el móvil no se vería aquí hasta recargar la página.
   onVaultChanged(() => reload())
 
-  // ---- Solicitudes (bandeja de desconocidos) -----------------------------
+  // ---- Requests inbox ------------------------------------------------------
 
-  // Aceptar una solicitud: promueve al peer a contacto (recién ahí entra al
-  // vault), inyecta su primer mensaje al hilo y la quita de la bandeja.
+  /** Accept a request: now we are contacts on both sides. No message enters any chat. */
   const acceptRequest = async (pubkey) => {
-    const r = requests.get(pubkey)
+    const r = requests.get(pubkey, 'in')
     if (!r) return
-    await contacts.addContact({
-      pubkey,
-      nickname: r.nickname || pubkey.slice(0, 8),
-      token: r.token,
-      encryptionPubkey: r.encryptionPubkey
-    })
-    if (r.text) await append(pubkey, { id: crypto.randomUUID(), dir: 'in', text: r.text, ts: r.ts })
-    pendingPeers.delete(pubkey)
-    requests.remove(pubkey)
+    await becomeContacts(pubkey, { nickname: r.nickname, token: r.token, encryptionPubkey: r.encryptionPubkey })
+    if (r.token) contacts.markOnline(pubkey, r.token)
+    await replyAccept(pubkey)
     await contacts.refresh()
   }
 
-  const dismissRequest = (pubkey) => {
-    pendingPeers.delete(pubkey)
-    requests.remove(pubkey)
+  /** Dismiss an incoming request, or cancel one I sent. The other side is not told. */
+  const dismissRequest = (pubkey, dir = 'in') => {
+    requests.remove(pubkey, dir)
   }
 
   return {
     threads, activePubkey, activeThread, activeContact, outbox, lastIncomingDM, peerCompat,
     setActive, sendDM, flushOutbox, markThreadRead,
-    handleIncoming, sendHello, sendHelloByPubkey, tryHandshake, sendChallenge,
-    askRatingsAbout, load, rememberAlias,
+    handleIncoming, sendHelloTo, sendContactRequest,
+    askRatingsAbout, load,
     requests, acceptRequest, dismissRequest
   }
 })

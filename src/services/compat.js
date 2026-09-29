@@ -9,8 +9,9 @@
  * faltó en los incidentes que originaron esta norma fue enterarse, no parar. El aviso va
  * pegado a la conversación con esa persona, que es donde se pierde el tiempo.
  *
- * `protocol` sube solo cuando cambia el cable (el formato `TIPO|json` y el sobre del
- * vault); `version` identifica esta build. La lista de rotas va por versión EXACTA,
+ * `protocol` sube solo cuando cambia el cable; `version` identifica esta build.
+ * Protocolo 2 (2026-09-28): todo va sellado por el transporte (`requireSealed`), y la
+ * solicitud de contacto es un mensaje de control que nunca entra al chat. La lista de rotas va por versión EXACTA,
  * nunca por rango.
  */
 import { declare, check } from '@dotrino/compat'
@@ -19,8 +20,8 @@ import { declare, check } from '@dotrino/compat'
 export const MINE = declare({
   product: 'messenger',
   version: __APP_VERSION__,
-  protocol: 1,
-  speaks: [1]
+  protocol: 2,
+  speaks: [2]
 })
 
 /**
