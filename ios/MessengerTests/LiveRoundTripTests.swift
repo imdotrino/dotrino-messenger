@@ -15,15 +15,15 @@ final class LiveRoundTripTests: XCTestCase {
         let threads = MemoryThreads()
         let e = MessengerEngine(transport: s, profile: p, peers: PeerBook(storage: PeerBook.MemoryStorage(), profile: p),
                                 threads: threads, kv: MemoryKv(), version: "0.3.0")
-        await e.setNickname("Eva_iOS")
-        await e.start(); s.start()
+        print("LIVE: start"); await e.setNickname("Eva_iOS"); print("LIVE: nick")
+        await e.start(); s.start(); print("LIVE: started")
         defer { s.close() }
         let online = await s.awaitOnline()
-        XCTAssertTrue(online)
-        try await e.addByCode(code, alias: "")
+        XCTAssertTrue(online); print("LIVE: online")
+        try await e.addByCode(code, alias: ""); print("LIVE: requested")
         var web: String?
         for _ in 0..<600 where web == nil { web = await e.contacts().first?["publickey"]?.string; if web == nil { try await Task.sleep(nanoseconds: 200_000_000) } }
-        let pk = try XCTUnwrap(web, "the web did not accept")
+        let pk = try XCTUnwrap(web, "the web did not accept"); print("LIVE: accepted")
         try await e.sendDM(pk, "hola desde ios")
         var got = false
         for _ in 0..<600 where !got { got = await e.thread(pk).contains { $0["text"]?.string == "hola ios, te leo desde la web" }; if !got { try await Task.sleep(nanoseconds: 200_000_000) } }
