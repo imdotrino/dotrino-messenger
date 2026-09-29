@@ -112,6 +112,8 @@ class MainActivity : Activity() {
                 engine = e
                 e.active = if (resumed) open else null
                 e.onChange = { rerenderSoon() }
+                // The bar again, now with the profile (its button shows the account in use).
+                setContentView(shell())
                 e.onNotice = { n -> ui.post { onNotice(n) } }
                 Messenger.session?.onStatus { ui.post { renderStatus() } }
                 if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -161,8 +163,10 @@ class MainActivity : Activity() {
             setOnClickListener { copyCode() }
         }
         codeChip = code
+        val p = Messenger.profile
         return DotrinoTopbar(this, repo = "imdotrino/dotrino-messenger",
             brand = DotrinoTopbar.Brand("Messenger", R.drawable.messenger_brand), actions = listOf(code),
+            profile = p?.let { DotrinoTopbar.Profile(engine?.nickname, it.profileId) },
         ) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://dotrino.com/"))) }.view
     }
 

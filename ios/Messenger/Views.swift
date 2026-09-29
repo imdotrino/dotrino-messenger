@@ -13,7 +13,8 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DotrinoTopbar(repo: "imdotrino/dotrino-messenger", brand: .init(name: "Messenger", image: Image("Brand"))) {
+            DotrinoTopbar(repo: "imdotrino/dotrino-messenger", brand: .init(name: "Messenger", image: Image("Brand")),
+                          profile: m.profileKey.map { .init(name: m.nickname, key: $0) }) {
                 if let code = m.code {
                     Button(code) { UIPasteboard.general.string = code }
                         .font(.system(.footnote, design: .monospaced).bold()).foregroundColor(Palette.text)

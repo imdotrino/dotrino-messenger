@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     @Published var open: String?
     @Published var messages: [Message] = []
     @Published var compat: [String: String] = [:]
+    @Published var profileKey: String?
+    @Published var nickname: String?
 
     private(set) var engine: MessengerEngine?
     private var session: SealedSession?
@@ -51,7 +53,7 @@ final class AppModel: ObservableObject {
             _ = s.onStatus { [weak self] st in Task { @MainActor in self?.status = st.state } }
             await e.start()
             s.start()
-            engine = e; session = s; booted = true
+            engine = e; session = s; booted = true; profileKey = p.profileId
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
             await refresh()
         } catch let e as Profile.ProfileError {
@@ -68,6 +70,7 @@ final class AppModel: ObservableObject {
     func refresh() async {
         guard let e = engine else { return }
         hasNickname = await e.hasNickname
+        nickname = await e.nickname
         code = await e.pairingCode
         requests = await e.requests()
         compat = await e.peerCompat
