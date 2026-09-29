@@ -16,10 +16,10 @@ protocol Transport: AnyObject {
     func onPeerGone(_ l: @escaping (String) -> Void) -> () -> Void
 }
 
+// The library's own methods already satisfy most of the protocol. DO NOT redeclare one with the
+// same signature here: inside the app it shadows the library's and calls itself forever (that
+// hung the first contact request).
 extension SealedSession: Transport {
-    func sendSealed(toToken token: String, _ payload: JSON, recipientEncPubs: [String]) async throws {
-        try await sendSealed(toToken: token, payload, recipientEncPubs: recipientEncPubs)
-    }
     func whoIs(_ token: String) async throws -> String? { try await whoIs(token, timeout: 10) }
     func requestPairingCode() async throws -> ProxyConnection.PairingCode { try await requestPairingCode(ttlMs: nil) }
     func onPeerGone(_ l: @escaping (String) -> Void) -> () -> Void {
