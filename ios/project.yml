@@ -1,0 +1,77 @@
+# Messenger para iOS: la versión NATIVA de messenger.dotrino.com (CONVENCIONES §16). La PWA va
+# delante; MARKETING_VERSION es la versión de la PWA con la que esta está a la par (§16.3).
+#
+#   cd ios && xcodegen generate
+#   xcodebuild -project Messenger.xcodeproj -scheme Messenger -destination 'platform=iOS Simulator,name=iPhone 16' test
+#
+# Firma: equipo DOTRINO S.A.S. (P7G853375S), automática, con los grupos compartidos del
+# ecosistema (dotrino-native/docs/DISENO.md §2.1): el perfil es el mismo en todas las apps.
+name: Messenger
+options:
+  bundleIdPrefix: com.dotrino
+  deploymentTarget:
+    iOS: "16.4"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: P7G853375S
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: 0.3.0
+    CURRENT_PROJECT_VERSION: 1
+packages:
+  DotrinoNative:
+    path: ../native
+targets:
+  Messenger:
+    type: application
+    platform: iOS
+    sources:
+      - Messenger
+    dependencies:
+      - package: DotrinoNative
+        product: DotrinoNative
+      - package: DotrinoNative
+        product: DotrinoNativeUI
+      - package: DotrinoNative
+        product: DotrinoNativeWebRTC
+    info:
+      path: Messenger/Info.plist
+      properties:
+        CFBundleDisplayName: Messenger
+        CFBundleDevelopmentRegion: es
+        CFBundleLocalizations: [es, en]
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIUserInterfaceStyle: Light
+        NSCameraUsageDescription: "Para leer el código QR de la persona que quieres agregar."
+    entitlements:
+      path: Messenger/Messenger.entitlements
+      properties:
+        keychain-access-groups: ["$(AppIdentifierPrefix)com.dotrino.shared"]
+        com.apple.security.application-groups: [group.com.dotrino]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dotrino.messenger
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  MessengerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [MessengerTests]
+    dependencies:
+      - target: Messenger
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Messenger.app/Messenger"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  Messenger:
+    build:
+      targets:
+        Messenger: all
+    test:
+      targets: [MessengerTests]

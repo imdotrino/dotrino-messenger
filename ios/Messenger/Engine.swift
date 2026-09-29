@@ -35,7 +35,7 @@ protocol Threads: AnyObject {
     func put(_ pubkey: String, _ entry: JSON)
 }
 
-final class StoreThreads: Threads {
+final class MessengerThreads: Threads {
     private let store: DotrinoStore
     private let index = "messenger.threads"
     init(_ store: DotrinoStore) { self.store = store }

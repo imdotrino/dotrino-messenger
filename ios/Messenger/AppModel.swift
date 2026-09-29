@@ -1,0 +1,116 @@
+import DotrinoNative
+import DotrinoNativeWebRTC
+import Foundation
+import UserNotifications
+
+/// What the screens show, on the main thread: a snapshot of the engine, refreshed on every
+/// change. The engine is an actor; the screens never touch it directly except through here.
+@MainActor
+final class AppModel: ObservableObject {
+    static let proxies = ["wss://proxy.dotrino.com", "wss://proxy2.dotrino.com"]
+
+    struct Contact: Identifiable, Equatable {
+        let id: String   // pubkey
+        let name: String
+        let online: Bool
+        let last: String?
+        let lastTs: Int64
+        let unread: Int
+    }
+    struct Message: Identifiable, Equatable { let id: String; let mine: Bool; let text: String; let ts: Int64; let pending: Bool }
+
+    @Published var problem: String?
+    @Published var booted = false
+    @Published var hasNickname = false
+    @Published var code: String?
+    @Published var status = "connecting"
+    @Published var contacts: [Contact] = []
+    @Published var requests: [MessengerEngine.Request] = []
+    @Published var open: String?
+    @Published var messages: [Message] = []
+    @Published var compat: [String: String] = [:]
+
+    private(set) var engine: MessengerEngine?
+    private var session: SealedSession?
+    private var refreshQueued = false
+
+    func boot() async {
+        if engine != nil { return }
+        do {
+            let p = try Profile.fromPhone()
+            let s = SealedSession(urls: Self.proxies, profile: p, app: "messenger")
+            s.useDirect(WebRTCDirect())
+            let peers = PeerBook(storage: PeerBook.PhoneStorage(profile: p), profile: p)
+            let account = (p.pid ?? "default").lowercased().replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
+            let store = try DotrinoStore(app: "messenger-" + account)
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+            let e = MessengerEngine(transport: s, profile: p, peers: peers, threads: MessengerThreads(store), kv: DefaultsKv(account: account),
+                                    version: version, reputation: Reputation(profile: p, peers: peers))
+            await e.setHandlers(onChange: { [weak self] in Task { @MainActor in self?.refreshSoon() } },
+                                onNotice: { n in Task { @MainActor in AppModel.notify(n) } })
+            _ = s.onStatus { [weak self] st in Task { @MainActor in self?.status = st.state } }
+            await e.start()
+            s.start()
+            engine = e; session = s; booted = true
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            await refresh()
+        } catch let e as Profile.ProfileError {
+            problem = t("native.noProfile") + (e.code == "no-profile" ? "" : " (\(e.code))")
+        } catch { problem = "\(error)" }
+    }
+
+    func refreshSoon() {
+        if refreshQueued { return }
+        refreshQueued = true
+        Task { try? await Task.sleep(nanoseconds: 60_000_000); refreshQueued = false; await refresh() }
+    }
+
+    func refresh() async {
+        guard let e = engine else { return }
+        hasNickname = await e.hasNickname
+        code = await e.pairingCode
+        requests = await e.requests()
+        compat = await e.peerCompat
+        var list: [Contact] = []
+        for c in await e.contacts() {
+            guard let pk = c["publickey"]?.string else { continue }
+            let th = await e.thread(pk)
+            let name = c["nickname"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? String(pk.prefix(8))
+            list.append(Contact(id: pk, name: name, online: await e.isOnline(pk), last: th.last?["text"]?.string,
+                                lastTs: th.last?["ts"]?.int ?? c["lastSeen"]?.int ?? 0, unread: await e.unread(pk)))
+        }
+        contacts = list.sorted { $0.lastTs > $1.lastTs }
+        if let pk = open {
+            messages = await e.thread(pk).map { m in
+                Message(id: m["id"]?.string ?? UUID().uuidString, mine: m["dir"]?.string == "out", text: m["text"]?.string ?? "",
+                        ts: m["ts"]?.int ?? 0, pending: m["pending"]?.bool ?? false)
+            }
+        }
+    }
+
+    func setNickname(_ n: String) async { await engine?.setNickname(n); await refresh() }
+
+    func openConversation(_ pk: String?) async {
+        open = pk
+        await engine?.setActive(pk)
+        if let pk { await engine?.markRead(pk); await engine?.sendHello(to: pk) }
+        await refresh()
+    }
+
+    func send(_ text: String) async throws { guard let pk = open else { return }; try await engine?.sendDM(pk, text) }
+    func addByCode(_ code: String, alias: String) async throws { try await engine?.addByCode(code, alias: alias) }
+    func accept(_ pk: String) async { await engine?.acceptRequest(pk) }
+    func dismiss(_ pk: String, _ dir: String) async { await engine?.dismissRequest(pk, dir: dir) }
+    func rate(_ pk: String, _ v: [String: Int]) async throws { try await engine?.rate(pk, v) }
+    func myIndicators(_ pk: String) async -> [String: Double] { await engine?.myIndicatorsFor(pk) ?? [:] }
+    func askRatings(_ pk: String) async { await engine?.askRatingsAbout(pk) }
+
+    /// The phone's notice for a message or a request (opened here: it arrived sealed to this phone).
+    static func notify(_ n: MessengerEngine.Notice) {
+        let c = UNMutableNotificationContent()
+        c.title = n.kind == "request" ? t("native.notifRequest", ["name": n.fromNickname]) : n.fromNickname
+        c.body = n.kind == "request" ? t("requests.defaultMsg") : n.text
+        c.userInfo = ["contact": n.fromPubkey]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: n.id, content: c, trigger: nil))
+    }
+}

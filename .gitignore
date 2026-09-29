@@ -16,3 +16,6 @@ android/local.properties
 android/app/build
 android/build
 ios/build
+ios/Messenger/Info.plist
+ios/Messenger/Messenger.entitlements
+ios/Messenger.xcodeproj
