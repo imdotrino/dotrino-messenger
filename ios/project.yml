@@ -68,10 +68,21 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Messenger.app/Messenger"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  MessengerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [MessengerUITests]
+    dependencies:
+      - target: Messenger
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Messenger
+
 schemes:
   Messenger:
     build:
       targets:
         Messenger: all
     test:
-      targets: [MessengerTests]
+      targets: [MessengerTests, MessengerUITests]
