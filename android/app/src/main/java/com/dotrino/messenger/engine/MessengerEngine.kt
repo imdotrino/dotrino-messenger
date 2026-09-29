@@ -15,6 +15,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -133,12 +134,16 @@ class MessengerEngine(
 
     /** Asks the proxy for a code; renews it before it expires. */
     suspend fun refreshPairingCode(): Unit = withContext(engine) {
-        codeJob?.cancel()
+        // The renewal timer calls this from INSIDE its own job: cancelling it here cancelled the
+        // very request that was renewing the code, and the chip was left empty.
+        val prev = codeJob; codeJob = null
+        if (prev != null && prev != coroutineContext[Job]) prev.cancel()
         try {
             val c = transport.requestPairingCode()
             pairingCode = c.code
             val left = c.expiresAt - now()
             if (left > 10_000) codeJob = scope.launch { delay(left - 5_000); refreshPairingCode() }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e
         } catch (e: Exception) { pairingCode = null; onWarn("pairing code", e) }
         changed()
     }

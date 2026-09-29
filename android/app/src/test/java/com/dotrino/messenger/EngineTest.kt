@@ -55,6 +55,8 @@ class EngineTest {
     private class Net {
         val byToken = HashMap<String, Phone>()
         val codes = HashMap<String, String>()
+        var codeTtl = 60_000L
+        var codeCalls = 0
         inner class Phone(val name: String) : Transport {
             val keys = SoftKeys()
             val profile = Profile.of(keys)
@@ -82,8 +84,9 @@ class EngineTest {
             override fun pubkeyOfToken(token: String) = byToken[token]?.profile?.publickey
             override suspend fun whoIs(token: String) = pubkeyOfToken(token)
             override suspend fun requestPairingCode(): ProxyConnection.PairingCode {
+                codeCalls++
                 val c = "C" + name.uppercase().take(5).padEnd(5, 'X'); codes[c] = token
-                return ProxyConnection.PairingCode(c, System.currentTimeMillis() + 60_000)
+                return ProxyConnection.PairingCode(c, System.currentTimeMillis() + codeTtl)
             }
             override suspend fun redeemPairingCode(code: String) = codes.remove(code) ?: throw ProxyConnection.ProxyError("bad code", "pair-invalid")
             override val isOnline = true
@@ -154,6 +157,16 @@ class EngineTest {
         eve.phone.forge(ana.phone, beto.pubkey, buildJsonObject { put("type", "DM"); put("text", "soy beto"); put("mid", "f1"); put("ts", 1) })
         delay(300)
         assertTrue(ana.engine.thread(beto.pubkey).none { it["text"]!!.jsonPrimitive.content == "soy beto" })
+    }
+
+    @Test fun theCodeRenewsItselfAndNeverGoesEmpty() = runBlocking {
+        val net = Net(); net.codeTtl = 10_300   // renewed 5 s before it expires: ~5.3 s from now
+        val ana = Person(net, "Ana")
+        until("first code") { ana.engine.pairingCode != null }
+        val before = net.codeCalls
+        withTimeout(12_000) { while (net.codeCalls == before) delay(100) }
+        delay(300)
+        assertTrue("the renewal left the code empty", ana.engine.pairingCode != null)
     }
 
     @Test fun bothAskingIsBothAccepting() = runBlocking {

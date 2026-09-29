@@ -164,7 +164,7 @@ actor MessengerEngine {
     // MARK: the short code
 
     func refreshPairingCode() async {
-        codeTask?.cancel()
+        codeTask?.cancel(); codeTask = nil
         do {
             let c = try await transport.requestPairingCode()
             pairingCode = c.code
@@ -172,12 +172,16 @@ actor MessengerEngine {
             if left > 10_000 {
                 codeTask = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(left - 5_000) * 1_000_000)
-                    if !Task.isCancelled { await self?.refreshPairingCode() }
+                    if !Task.isCancelled { await self?.renewalFired() }
                 }
             }
         } catch { pairingCode = nil }
         onChange()
     }
+
+    /// The renewal timer fired: it forgets itself FIRST, so the refresh does not cancel the task
+    /// it is running in (that left the code empty on Android).
+    private func renewalFired() async { codeTask = nil; await refreshPairingCode() }
 
     /// Redeem someone's code and send a CONTACT REQUEST. Throws `own`, `offline` or `invalid`.
     func addByCode(_ code: String, alias: String) async throws {
