@@ -15,7 +15,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
   <div class="welcome">
     <div class="card">
       <div class="brand">
-        <div class="logo">CC</div>
+        <img class="logo" src="/icon.svg" alt="" />
         <h1>Dotrino</h1>
         <p class="tagline">{{ t.welcome.tagline }}</p>
       </div>
@@ -71,15 +71,11 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
 
 .brand { text-align: center; margin-bottom: 32px; }
 .logo {
+  display: block;
   width: 64px; height: 64px;
   margin: 0 auto 16px;
-  background: var(--accent); color: var(--on-accent);
-  border-radius: 14px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-headline);
-  font-weight: 700; font-size: 22px;
-  letter-spacing: -0.02em;
-  box-shadow: 0 4px 14px rgba(192, 57, 43, 0.25);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.25);
 }
 .brand h1 {
   margin: 0;
@@ -152,7 +148,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
   margin-top: 32px;
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 16px;
   display: flex;
   gap: 12px;

@@ -233,7 +233,7 @@ const pasteToken = async () => {
   display: flex; gap: 4px;
   background: var(--bg-3);
   padding: 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-pill);
   margin-bottom: 20px;
 }
 .tab {
@@ -245,14 +245,14 @@ const pasteToken = async () => {
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   transition: background 150ms ease-out, color 150ms ease-out;
 }
 .tab:hover { color: var(--text); }
 .tab.active {
   background: #ffffff;
   color: var(--text);
-  box-shadow: 0 1px 2px rgba(120, 80, 50, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 101, 140, 0.08);
 }
 
 .tab-pane { display: flex; flex-direction: column; gap: 16px; }
@@ -262,7 +262,7 @@ const pasteToken = async () => {
   display: flex; gap: 12px; align-items: flex-start;
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 14px;
 }
 .info-icon {
@@ -333,8 +333,8 @@ const pasteToken = async () => {
 .scan-btn {
   align-self: flex-start;
   font: inherit; font-size: 14px; cursor: pointer;
-  padding: 9px 14px;
-  border-radius: 10px;
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--bg-3);
   color: var(--text);
@@ -350,7 +350,7 @@ const pasteToken = async () => {
   flex: 1;
   background: #ffffff;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 16px;
   font-size: 28px;
   font-family: var(--font-mono);

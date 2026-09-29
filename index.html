@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#2c3e50" />
+    <meta name="theme-color" content="#f4f7f9" />
     <!-- Sin esto, el navegador cachea index.html por ~10 min y el SW puede
          servir HTML viejo que apunta a chunks JS ya renombrados por la
          siguiente build → 404 en assets/index-XXX.js. -->
@@ -53,10 +53,9 @@
       .boot {
         display: flex; align-items: center; justify-content: center;
         height: 100vh; height: 100dvh;
-        background: #faf3e7; color: #8a7a66;
+        background: #f4f7f9; color: #4a5560; font-family: "Quicksand", system-ui, sans-serif;
         font: 15px/1.5 system-ui, sans-serif;
       }
-      @media (prefers-color-scheme: dark) { .boot { background: #1b2533; color: #8fa3b8; } }
     </style>
     <script type="module" src="/src/main.js"></script>
   </body>

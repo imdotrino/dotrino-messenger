@@ -98,7 +98,6 @@ const grouped = computed(() => {
           <span :class="['status-text', online ? 'on' : 'off']">
             {{ online ? t.conv.online : t.conv.offline }}
           </span>
-          <code v-if="c.lastToken">{{ c.lastToken }}</code>
         </div>
       </div>
       <button class="rate-btn" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
@@ -212,15 +211,6 @@ const grouped = computed(() => {
 }
 .status-text.on  { color: var(--online); font-weight: 500; }
 .status-text.off { color: var(--muted); font-style: italic; }
-.sub code {
-  background: var(--bg-3);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-
 .rate-btn {
   background: transparent;
   color: var(--gold);
@@ -271,7 +261,7 @@ const grouped = computed(() => {
   background: #ffffff;
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 1px rgba(120, 80, 50, 0.04);
+  box-shadow: 0 1px 1px rgba(0, 101, 140, 0.04);
   position: relative;
   line-height: 1.45;
 }
@@ -281,7 +271,7 @@ const grouped = computed(() => {
   color: var(--on-accent);
   border: 0;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 1px 2px rgba(192, 57, 43, 0.25);
+  box-shadow: 0 1px 2px rgba(var(--accent-rgb), 0.25);
 }
 .text {
   white-space: pre-wrap;
@@ -352,7 +342,7 @@ const grouped = computed(() => {
   display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   transition: background 150ms ease-out, transform 100ms ease-out;
-  box-shadow: 0 1px 3px rgba(192, 57, 43, 0.25);
+  box-shadow: 0 1px 3px rgba(var(--accent-rgb), 0.25);
 }
 .send:hover:not(:disabled) { background: var(--accent-2); }
 .send:active:not(:disabled) { transform: scale(0.95); }

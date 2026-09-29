@@ -245,16 +245,16 @@ const topbarRef = ref(null)
 const identityInst = ref(null)
 const reputationInst = ref(null)
 
-// Tema del modal de perfil (vars --ccp-*), acorde al claro "Warm Sand" del messenger.
+// Tema de la tarjeta de perfil (vars --ccp-*): «Cool & Cozy», los mismos valores que el home.
 const profileTheme = {
-  '--ccp-bg': '#faf3e7', '--ccp-bg-2': '#f5ede0', '--ccp-bg-3': '#ede2cf', '--ccp-bg-4': '#e0d3ba',
-  '--ccp-border': '#d4c4a8', '--ccp-text': '#2b211a', '--ccp-muted': '#8a7a66',
-  '--ccp-accent': '#c0392b', '--ccp-accent-2': '#a93226', '--ccp-accent-text': '#ffffff',
-  '--ccp-gold': '#d4a72c', '--ccp-derived': '#a37a45',
-  '--ccp-online': '#5a8a3a', '--ccp-affinity': '#a37a45', '--ccp-input-bg': '#ffffff',
-  '--ccp-radius': '12px',
-  '--ccp-font': '"Inter", system-ui, sans-serif',
-  '--ccp-font-headline': '"Space Grotesk", system-ui, sans-serif',
+  '--ccp-bg': '#ffffff', '--ccp-bg-2': '#f4f7f9', '--ccp-bg-3': '#eaeff3', '--ccp-bg-4': '#e3e9ed',
+  '--ccp-border': '#cfd8de', '--ccp-text': '#181c1e', '--ccp-muted': '#4a5560',
+  '--ccp-accent': '#00658c', '--ccp-accent-2': '#00506f', '--ccp-accent-text': '#ffffff',
+  '--ccp-gold': '#c98a00', '--ccp-derived': '#b07f00',
+  '--ccp-online': '#00897b', '--ccp-affinity': '#2f8fd6', '--ccp-input-bg': '#f1f4f6',
+  '--ccp-radius': '16px',
+  '--ccp-font': '"Quicksand", system-ui, sans-serif',
+  '--ccp-font-headline': '"Quicksand", system-ui, sans-serif',
   '--ccp-font-mono': '"JetBrains Mono", ui-monospace, monospace',
 }
 
@@ -386,7 +386,7 @@ const maybeStartTutorial = () => {
         />
         <div v-else class="empty">
           <div class="empty-card">
-            <div class="empty-mark">CC</div>
+            <img class="empty-mark" src="/icon.svg" alt="" />
             <h4>{{ t.empty.title }}</h4>
             <p>{{ t.empty.before }} <strong>+</strong> {{ t.empty.after }}</p>
           </div>
@@ -431,12 +431,12 @@ const maybeStartTutorial = () => {
 .login-card .btn { width: 100%; }
 
 /* Topbar estándar (@dotrino/topbar): solo lo tematizamos con los tokens
-   "Warm Sand" de la app; el layout, la marca, el volver, el perfil y la moneda
+   «Cool & Cozy» de la app; el layout, la marca, el volver, el perfil y la moneda
    los pone el componente. */
 .topbar {
   display: block;
   flex-shrink: 0;
-  --dotrino-topbar-bg: var(--bg-2);
+  --dotrino-topbar-bg: var(--bg-1);
   --dotrino-topbar-border: var(--border);
   --dotrino-topbar-text: var(--text);
   --dotrino-topbar-muted: var(--muted);
@@ -446,7 +446,7 @@ const maybeStartTutorial = () => {
   --dotrino-topbar-font: var(--font-body);
 }
 .topbar::part(brand-icon) { width: 36px; height: 36px; border-radius: 0; object-fit: contain; }
-.topbar::part(brand-name) { font-family: var(--font-headline); font-weight: 600; font-size: 17px; }
+.topbar::part(brand-name) { font-family: var(--font-brand); font-weight: 700; font-size: 17px; }
 /* Botón de perfil: mismo ghost circular que el resto de controles de la barra. */
 .topbar::part(profile) { background: var(--bg-4); border-color: var(--border); color: var(--text); }
 
@@ -478,7 +478,7 @@ const maybeStartTutorial = () => {
   font-size: 13px;
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.dot.on  { background: var(--online); box-shadow: 0 0 0 2px rgba(90, 138, 58, 0.18); }
+.dot.on  { background: var(--online); box-shadow: 0 0 0 2px rgba(0, 137, 123, 0.18); }
 .dot.off { background: var(--accent); opacity: 0.6; }
 .who { color: var(--text); font-weight: 500; }
 .tok {
@@ -499,7 +499,7 @@ const maybeStartTutorial = () => {
 .cc-install {
   --cc-install-color: var(--accent);
   --cc-install-accent: var(--accent);
-  --cc-install-bg-hover: rgba(192, 57, 43, 0.08);
+  --cc-install-bg-hover: rgba(var(--accent-rgb), 0.08);
   --cc-install-radius: 8px;
   --cc-install-font-size: 13px;
 }
@@ -525,7 +525,7 @@ const maybeStartTutorial = () => {
 .bell-badge {
   position: absolute; top: -4px; right: -4px;
   min-width: 18px; height: 18px; padding: 0 5px;
-  border-radius: 999px; background: var(--accent, #2dd4bf); color: #04221d;
+  border-radius: 999px; background: var(--accent); color: var(--on-accent);
   font-size: 11px; font-weight: 700; line-height: 18px;
 }
 
@@ -558,7 +558,7 @@ const maybeStartTutorial = () => {
   font-weight: 700;
   cursor: pointer;
   transition: background 150ms ease-out, transform 100ms ease-out;
-  box-shadow: 0 1px 3px rgba(192, 57, 43, 0.25);
+  box-shadow: 0 1px 3px rgba(var(--accent-rgb), 0.25);
 }
 .add-btn:hover { background: var(--accent-2); }
 .add-btn:active { transform: translateY(1px); }
@@ -579,16 +579,15 @@ const maybeStartTutorial = () => {
   max-width: 380px;
   padding: 32px;
   background: var(--bg-2);
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
 }
 .empty-mark {
+  display: block;
   width: 56px; height: 56px;
   margin: 0 auto 16px;
-  background: var(--accent); color: var(--on-accent);
-  border-radius: 14px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-headline); font-weight: 700; font-size: 18px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
 }
 .empty-card h4 {
   margin: 0 0 8px;

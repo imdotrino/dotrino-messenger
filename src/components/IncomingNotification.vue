@@ -44,7 +44,7 @@ watch(() => props.dm, (next) => {
   >
     <div class="cc-incoming-card">
       <div class="cc-incoming-from">{{ dm?.fromNickname || t.incoming.newMessage }}</div>
-      <div class="cc-incoming-text">{{ dm?.text }}</div>
+      <div class="cc-incoming-text">{{ dm?.request ? t.requests.defaultMsg : dm?.text }}</div>
     </div>
   </div>
 </template>
@@ -73,7 +73,7 @@ watch(() => props.dm, (next) => {
   border-radius: 18px;
   padding: 24px 30px;
   max-width: min(460px, 82vw);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--shadow-pop);
   pointer-events: auto;
   text-align: center;
   transform: translateY(0);

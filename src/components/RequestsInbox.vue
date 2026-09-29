@@ -55,29 +55,29 @@ const cancel = (pk) => threads.dismissRequest(pk, 'out')
 </template>
 
 <style scoped>
-.requests { border-bottom: 1px solid var(--line, #2a3550); }
-.req-empty { font-size: 12.5px; color: var(--muted, #8aa0bd); padding: 4px 12px 12px; margin: 0; }
+.requests { border-bottom: 1px solid var(--border); }
+.req-empty { font-size: 12.5px; color: var(--muted); padding: 4px 12px 12px; margin: 0; }
 .req-head {
   font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--muted, #8aa0bd); padding: 10px 12px 6px; display: flex; align-items: center; gap: 6px;
+  color: var(--muted); padding: 10px 12px 6px; display: flex; align-items: center; gap: 6px;
 }
-.count { background: var(--accent, #2dd4bf); color: #04221d; border-radius: 999px; padding: 0 7px; font-size: 11px; }
+.count { background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 0 7px; font-size: 11px; }
 .req-list { list-style: none; margin: 0; padding: 0; }
 .req {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-  border-top: 1px solid rgba(255,255,255,.04);
+  border-top: 1px solid var(--border);
 }
-.req.vouched { background: rgba(45,212,191,.06); }
+.req.vouched { background: var(--accent-soft); }
 .req-info { flex: 1; min-width: 0; }
 .req-name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.vouch { font-size: 10px; font-weight: 700; color: #04221d; background: var(--accent, #2dd4bf); border-radius: 4px; padding: 1px 5px; text-transform: uppercase; }
-.stranger { font-size: 10px; color: var(--muted, #8aa0bd); border: 1px solid var(--line, #2a3550); border-radius: 4px; padding: 0 5px; text-transform: uppercase; }
-.req-msg { font-size: 13px; color: var(--muted, #8aa0bd); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.vouch { font-size: 10px; font-weight: 700; color: var(--on-accent); background: var(--accent); border-radius: var(--radius-pill); padding: 1px 5px; text-transform: uppercase; }
+.stranger { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 6px; text-transform: uppercase; }
+.req-msg { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .req-actions { display: flex; gap: 6px; }
 .req-actions button {
-  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line, #2a3550);
-  background: var(--panel2, #1b2536); color: var(--text, #e7edf6); cursor: pointer; font-size: 15px;
+  width: 30px; height: 30px; border-radius: var(--radius-pill); border: 1px solid var(--border-strong);
+  background: var(--bg-2); color: var(--text); cursor: pointer; font-size: 15px;
 }
-.req-actions .ok { color: #34d399; }
-.req-actions .no { color: #f87171; }
+.req-actions .ok { color: var(--online); }
+.req-actions .no { color: var(--danger); }
 </style>

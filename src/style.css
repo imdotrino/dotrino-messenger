@@ -1,40 +1,93 @@
-/* Dotrino — Warm Sand design tokens.
-   Light mode, arena/cream backgrounds, terracotta brand accent. */
-:root {
-  /* Surfaces (arena, warm) */
-  --bg-1: #faf3e7;          /* main background (chat area) */
-  --bg-2: #f5ede0;          /* sidebar, cards */
-  --bg-3: #ede2cf;          /* nested cards, hover */
-  --bg-4: #e0d3ba;          /* inputs, separators */
+/* Dotrino — tema «Cool & Cozy», el mismo del home (dotrino.com).
+   Material 3: azul #00658c, Quicksand en el texto y Comfortaa en la marca, formas de
+   pastilla, tarjetas blancas sin borde duro con sombra teñida de azul, y nada de blanco
+   puro de fondo. Los nombres de los tokens son los de siempre (--bg-*, --accent…): solo
+   cambian los valores, así que los componentes no se tocan.
 
-  /* Text */
-  --text:  #2b211a;          /* deep brown, not pure black */
-  --muted: #8a7a66;          /* taupe */
-  --on-accent: #ffffff;
-
-  /* Borders / outlines */
-  --border:        #d4c4a8;
-  --border-strong: #b8a685;
-
-  /* Brand accents */
-  --accent:    #c0392b;      /* terracotta primary */
-  --accent-2:  #a93226;      /* terracotta hover */
-  --danger:    #b03a2e;      /* same family for danger */
-
-  /* Trust UI */
-  --gold:    #d4a72c;        /* own ratings (mustard gold) */
-  --derived: #a37a45;        /* peer-derived (bronze/copper) */
-
-  /* Status */
-  --online: #5a8a3a;         /* olive green */
-
-  /* Typography */
-  --font-headline: "Space Grotesk", system-ui, sans-serif;
-  --font-body:     "Inter", system-ui, sans-serif;
-  --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+   Fuentes AUTOHOSPEDADAS (public/fonts): sin Google Fonts, que es un tercero que ve la
+   IP de quien abre la app. Antes se cargaban de ahí. */
+@font-face {
+  font-family: 'Quicksand';
+  src: url('/fonts/quicksand.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Quicksand';
+  src: url('/fonts/quicksand-ext.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Comfortaa';
+  src: url('/fonts/comfortaa.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Comfortaa';
+  src: url('/fonts/comfortaa-ext.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/jetbrains-mono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
 }
 
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+:root {
+  /* Siempre claro, como el home: evita el «force dark» de los navegadores móviles. */
+  color-scheme: light;
+
+  /* Superficies */
+  --bg-1: #f4f7f9;          /* fondo de página y del chat */
+  --bg-2: #ffffff;          /* barra lateral, tarjetas */
+  --bg-3: #f1f4f6;          /* tarjetas anidadas, hover */
+  --bg-4: #e3e9ed;          /* separadores, fondos de controles */
+
+  /* Texto */
+  --text:  #181c1e;
+  --muted: #4a5560;
+  --on-accent: #ffffff;
+
+  /* Bordes */
+  --border:        #e3e9ed;
+  --border-strong: #cfd8de;
+
+  /* Marca */
+  --accent:     #00658c;
+  --accent-2:   #00506f;    /* hover / pulsado */
+  --accent-rgb: 0, 101, 140;
+  --accent-soft: rgba(var(--accent-rgb), 0.10);
+  --brand-soft: #72c1f0;
+  --danger:     #ba1a1a;
+
+  /* Confianza */
+  --gold:    #c98a00;       /* mis calificaciones */
+  --derived: #b07f00;       /* derivadas de la red */
+
+  /* Estado */
+  --online: #00897b;
+
+  /* Geometría y sombra del sistema */
+  --radius:      16px;
+  --radius-lg:   28px;
+  --radius-pill: 9999px;
+  --shadow-card: 0 4px 20px rgba(114, 193, 240, 0.08);
+  --shadow-pop:  0 12px 40px rgba(0, 101, 140, 0.16);
+
+  /* Tipografía */
+  --font-brand:    "Comfortaa", "Quicksand", system-ui, sans-serif;
+  --font-headline: "Quicksand", system-ui, sans-serif;
+  --font-body:     "Quicksand", system-ui, sans-serif;
+  --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
 
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
@@ -48,6 +101,7 @@ body {
 }
 h1, h2, h3, h4 {
   font-family: var(--font-headline);
+  font-weight: 700;
   color: var(--text);
   letter-spacing: -0.01em;
 }
@@ -56,9 +110,9 @@ button { font-family: inherit; }
 input, textarea {
   background: #ffffff;
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   font: inherit;
   font-family: var(--font-body);
   transition: border-color 180ms ease-out, box-shadow 180ms ease-out;
@@ -66,41 +120,39 @@ input, textarea {
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
 }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 
 /* Modal scaffolding (reused by every modal) */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(43, 33, 26, 0.55);
+  background: rgba(24, 28, 30, 0.45);
   display: flex; align-items: center; justify-content: center;
   z-index: 100; padding: 16px;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
 .modal {
-  background: var(--bg-1);
-  border-radius: 12px;
+  background: var(--bg-2);
+  border-radius: var(--radius-lg);
   padding: 0;
   max-width: 480px;
   width: 100%;
-  box-shadow:
-    0 1px 2px rgba(120, 80, 50, 0.08),
-    0 12px 36px rgba(120, 80, 50, 0.18);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
-.modal h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.modal h2 { margin: 0; font-size: 20px; font-weight: 700; }
 
 /* Buttons */
 .btn {
   background: var(--accent);
   color: var(--on-accent);
   border: 0;
-  padding: 10px 18px;
-  border-radius: 12px;
+  padding: 10px 20px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-body);
   transition: background 150ms ease-out, transform 100ms ease-out;
 }
@@ -118,7 +170,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   color: var(--danger);
   border: 1px solid var(--danger);
 }
-.btn.danger:hover:not(:disabled) { background: rgba(176, 58, 46, 0.08); }
+.btn.danger:hover:not(:disabled) { background: rgba(186, 26, 26, 0.08); }
 .btn.icon {
   padding: 0; width: 40px; height: 40px;
   border-radius: 50%;
