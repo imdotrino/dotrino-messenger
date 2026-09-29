@@ -47,7 +47,7 @@ object Messenger {
         }
         val e = MessengerEngine(
             SessionTransport(s), p, peers,
-            StoreThreads(DotrinoStore(ctx, "messenger." + (p.pid ?: "default"))),
+            StoreThreads(DotrinoStore(ctx, "messenger-" + (p.pid ?: "default").lowercase().replace(Regex("[^a-z0-9-]"), "-"))),
             kv, BuildConfig.VERSION_NAME, Reputation(p, peers),
         )
         e.onWarn = { w, t -> android.util.Log.w("messenger", w, t) }
