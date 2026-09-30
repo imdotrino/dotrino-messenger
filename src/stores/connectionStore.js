@@ -340,6 +340,11 @@ export const useConnectionStore = defineStore('connection', () => {
     wsProxyClient.on('peer_disconnected', (peerToken) => {
       import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
     })
+    // El pilar mandó a un token que ya no existe (la otra punta reinició la app) y lo reenvió
+    // por su pubkey: ese token se olvida, o los siguientes mensajes volverían a ir ahí.
+    wsProxyClient.on('token_gone', (peerToken) => {
+      import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
+    })
     // El client se rindió de reconectar al proxio actual → intentar otro nodo.
     wsProxyClient.on('reconnect_failed', () => { attemptFailover() })
   }
