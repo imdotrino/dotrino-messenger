@@ -21,7 +21,7 @@ import { getIdentity } from './services/identity'
 import { getReputation } from './services/reputation'
 import { isDisplayed, markDisplayed } from './services/displayedMessages'
 import { changed as accountChanged, accountId, forgetAccount } from './services/account'
-import { storeStatus, vaultSyncNow } from './services/store'
+import { storeStatus, vaultSyncNow, getStore } from './services/store'
 import { useBackLayer } from '@dotrino/nav/vue'
 import { t, lang, setLang } from './i18n'
 
@@ -257,6 +257,13 @@ watchEffect(() => {
   tb.identity = identityInst.value ?? null
   tb.reputation = reputationInst.value ?? null
   tb.profileTheme = profileTheme
+})
+
+// El estado del respaldo en la bóveda, a la vista en el botón de perfil (topbar ≥ 0.13).
+watchEffect(() => {
+  const tb = topbarRef.value
+  if (!tb || !identityInst.value) return
+  getStore().then((store) => { tb.store = store }).catch((e) => console.error('[messenger] topbar store:', e))
 })
 
 // Al pulsar "Mi perfil" refrescamos igual que hacía el modal propio: pedimos a los
