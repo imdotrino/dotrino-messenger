@@ -82,7 +82,7 @@ class EngineTest {
                 val o = to.sealing.open(sealing.seal(payload, listOf(to.profile.encPub)))
                 to.listeners.forEach { it(SealedSession.Message(token, null, o.payload, o.senderEncPub, false, null)) }
             }
-            override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>) = deliverTo(byToken.getValue(token), payload, recipientEncPubs)
+            override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>, peerPubkey: String?) = deliverTo(byToken.getValue(token), payload, recipientEncPubs)
             override suspend fun sendSealed(pubkey: String, payload: JsonObject, recipientEncPubs: List<String>, quiet: Boolean) =
                 deliverTo(byToken.values.first { it.profile.publickey == pubkey }, payload, recipientEncPubs)
             override suspend fun encPubOf(publickey: String) = byToken.values.first { it.profile.publickey == publickey }.profile.encPub

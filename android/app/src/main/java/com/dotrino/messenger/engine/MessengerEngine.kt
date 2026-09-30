@@ -173,7 +173,7 @@ class MessengerEngine(
         // If they already asked me, this is an acceptance: both sides want it.
         if (loadRequests().any { it.pubkey == pubkey && it.dir == "in" }) { acceptRequest(pubkey); return }
         val payload = JsonObject(whoAmI() + ("type" to JsonPrimitive("CONTACT_REQUEST")))
-        if (token != null) transport.sendSealedTo(token, payload) else transport.sendSealed(pubkey, payload)
+        if (token != null) transport.sendSealedTo(token, payload, peerPubkey = pubkey) else transport.sendSealed(pubkey, payload)
         upsertRequest(Request(pubkey, "out", sanitizeNickname(alias), token, null, now()))
         changed()
     }
@@ -243,7 +243,7 @@ class MessengerEngine(
     private suspend fun sendToContact(pubkey: String, payload: JsonObject, quiet: Boolean = false) {
         val keys = peers.encPubsOf(pubkey)
         val token = synchronized(online) { online[pubkey] }
-        if (token != null) transport.sendSealedTo(token, payload, keys)
+        if (token != null) transport.sendSealedTo(token, payload, keys, pubkey)
         else transport.sendSealed(pubkey, payload, keys, quiet)
     }
 
