@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
     private var refreshQueued = false
     private var backup: VaultBackup?
     private var backupTask: Task<Void, Never>?
+    private var backupLoop: Task<Void, Never>?
 
     /// Reconcile with the vault in [delay] seconds (a moment after a write, or now).
     func syncSoon(_ delay: Double) {
@@ -94,7 +95,7 @@ final class AppModel: ObservableObject {
             engine = e; session = s; booted = true; profileKey = p.profileId
             topbarProfile = p.name == nil ? DotrinoTopbarProfile(name: await e.nickname, key: p.avatarSeed, avatar: p.avatar) : p.topbar
             if backup != nil {
-                Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
+                backupLoop = Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
             }
             Self.current = self
             if let t = Self.lastPush { s.setPushToken(t) }
@@ -103,6 +104,18 @@ final class AppModel: ObservableObject {
         } catch let e as Profile.ProfileError {
             problem = t("native.noProfile") + (e.code == "no-profile" ? "" : " (\(e.code))")
         } catch { problem = "\(error)" }
+    }
+
+    /// ANOTHER PROFILE (switched, created, adopted, signed in from the bar's menu): everything
+    /// starts again with it — changing profile is not reactive, as on the web.
+    func reboot() async {
+        await engine?.stop()
+        session?.close()
+        backupTask?.cancel(); backupLoop?.cancel()
+        engine = nil; session = nil; backup = nil; booted = false
+        contacts = []; requests = []; messages = []; open = nil; code = nil; problem = nil
+        profileKey = nil; topbarProfile = nil; nickname = nil; hasNickname = false
+        await boot()
     }
 
     func refreshSoon() {

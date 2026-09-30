@@ -131,6 +131,12 @@ actor MessengerEngine {
     }
     func setActive(_ pk: String?) { active = pk }
 
+    /** Stops listening and renewing the code (the app is starting again with another profile). */
+    func stop() {
+        offs.forEach { $0() }; offs.removeAll()
+        codeTask?.cancel(); codeTask = nil
+    }
+
     func start() {
         offs.append(transport.onMessage { [weak self] m in Task { await self?.handle(m) } })
         offs.append(transport.onOnline { [weak self] in Task { await self?.whenOnline() } })

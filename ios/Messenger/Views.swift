@@ -15,7 +15,7 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             DotrinoTopbar(repo: "imdotrino/dotrino-messenger", brand: .init(name: "Messenger", image: Image("Brand")),
-                          profile: m.topbarProfile) {
+                          profile: m.topbarProfile, onProfileChanged: { Task { await m.reboot() } }) {
                 if let code = m.code {
                     Button(code) { incomingCode = nil; addTab = "mine"; addOpen = true }
                         .font(.system(.footnote, design: .monospaced).bold()).foregroundColor(Palette.text)
