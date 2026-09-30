@@ -23,7 +23,9 @@ El eje del ecosistema **[Dotrino](https://dotrino.com)** es el **autohosteo** y 
 
 ---
 
-App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino), en tres versiones (CONVENCIONES §16): la **PWA** (`src/`, en `messenger.dotrino.com`, va delante), **Android** (`android/`, Kotlin con vistas nativas) e **iOS** (`ios/`, SwiftUI). Las nativas usan [`dotrino-native`](https://github.com/imdotrino/dotrino-native) (submódulo `native/`): mismo protocolo sellado, mismo libro de contactos del perfil, el historial respaldado en la bóveda y reconciliado con el de la PWA, QR, camino directo por WebRTC y calificaciones. Los textos nativos salen de `src/i18n.js` (`node scripts/native-i18n.mjs`).
+App de mensajería P2P del ecosistema [Dotrino](https://github.com/imdotrino), en tres versiones (CONVENCIONES §16): la **PWA** (`src/`, en `messenger.dotrino.com`, va delante), **Android** (`android/`, Kotlin con vistas nativas) e **iOS** (`ios/`, SwiftUI). Las nativas usan [`dotrino-native`](https://github.com/imdotrino/dotrino-native) (submódulo `native/`): mismo protocolo sellado, mismo libro de contactos del perfil, el historial respaldado en la bóveda y reconciliado con el de la PWA, QR, camino directo por WebRTC y calificaciones. Los textos nativos salen de `src/i18n.js` (`node scripts/native-i18n.mjs`, que escribe también el `Localizable.strings` con el texto del aviso de iOS).
+
+Avisos nativos: FCM en Android y **APNs directo en iOS** (el proxio ≥ 1.3.0 timbra sin contenido), con **el trino** de `dotrino-native` (`DotrinoRing`), también con la app abierta. La barra muestra el perfil activo como la web (nombre y avatar). Android en la prueba interna de Play (`com.dotrino.messenger`, misma llave de firma que Identidad Dotrino): [beta](https://play.google.com/apps/internaltest/4701700199204289743).
 
 ```sh
 cd android && dotrino-env run --ns claude -- ./gradlew --no-daemon :app:assembleRelease   # firmada con la llave de la app de identidad
