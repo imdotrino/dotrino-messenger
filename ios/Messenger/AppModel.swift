@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
     @Published var messages: [Message] = []
     @Published var compat: [String: String] = [:]
     @Published var profileKey: String?
+    /// The profile as the web topbar shows it: its name and its avatar (photo or identicon).
+    @Published var topbarProfile: DotrinoTopbarProfile?
     @Published var nickname: String?
 
     /// The APNs token arrives at the app delegate, whenever Apple gives it: kept here and handed
@@ -90,6 +92,7 @@ final class AppModel: ObservableObject {
             await e.start()
             s.start()
             engine = e; session = s; booted = true; profileKey = p.profileId
+            topbarProfile = p.name == nil ? DotrinoTopbarProfile(name: await e.nickname, key: p.avatarSeed, avatar: p.avatar) : p.topbar
             if backup != nil {
                 Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
             }

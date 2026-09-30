@@ -167,7 +167,8 @@ class MainActivity : Activity() {
         val p = Messenger.profile
         return DotrinoTopbar(this, repo = "imdotrino/dotrino-messenger",
             brand = DotrinoTopbar.Brand("Messenger", R.drawable.messenger_brand), actions = listOf(code),
-            profile = p?.let { DotrinoTopbar.Profile(engine?.nickname, it.profileId) },
+            // The PROFILE, as the web topbar shows it: its name and its avatar (photo or identicon).
+            profile = p?.topbar()?.let { if (it.name == null) it.copy(name = engine?.nickname) else it },
         ) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://dotrino.com/"))) }.view
     }
 
