@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     struct Message: Identifiable, Equatable { let id: String; let mine: Bool; let text: String; let ts: Int64; let pending: Bool }
 
     @Published var problem: String?
+    /// There is no profile yet: it is made or adopted HERE (no other app is needed).
+    @Published var noProfile = false
     @Published var booted = false
     @Published var hasNickname = false
     @Published var code: String?
@@ -105,6 +107,7 @@ final class AppModel: ObservableObject {
             await refresh()
         } catch let e as Profile.ProfileError {
             problem = t("native.noProfile") + (e.code == "no-profile" ? "" : " (\(e.code))")
+            noProfile = true
         } catch { problem = "\(error)" }
     }
 
@@ -114,7 +117,7 @@ final class AppModel: ObservableObject {
         await engine?.stop()
         session?.close()
         backupTask?.cancel(); backupLoop?.cancel()
-        engine = nil; session = nil; backup = nil; booted = false
+        engine = nil; session = nil; backup = nil; booted = false; noProfile = false
         contacts = []; requests = []; messages = []; open = nil; code = nil; problem = nil
         profileKey = nil; topbarProfile = nil; nickname = nil; hasNickname = false
         await boot()

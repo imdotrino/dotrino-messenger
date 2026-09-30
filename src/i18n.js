@@ -153,7 +153,10 @@ export const messages = {
     // fuente única de los textos, así que lo que solo existe allí también vive aquí.
     native: {
       welcomeInfo: 'Tu identidad vive en este teléfono. La llave que te identifica nunca sale de él.',
-      noProfile: 'Este teléfono todavía no tiene una cuenta de Dotrino. Créala en la app «Identidad Dotrino» y vuelve aquí.',
+      noProfile: 'Este teléfono todavía no tiene un perfil de Dotrino. Créalo aquí mismo o adopta uno que ya tengas.',
+      noIdentityApp: 'Tu perfil de Dotrino vive en la app «Identidad Dotrino». Instálala y vuelve aquí.',
+      createProfile: 'Crear perfil',
+      adoptProfile: 'Adoptar un perfil',
       needsSigner: 'Este teléfono no firma por tu cuenta, así que no puede enviar mensajes a tu nombre.',
       connecting: 'Conectando…',
       offline: 'Sin conexión: tus mensajes esperan y salen solos al volver.',
@@ -287,7 +290,10 @@ export const messages = {
 
     native: {
       welcomeInfo: 'Your identity lives on this phone. The key that identifies you never leaves it.',
-      noProfile: 'This phone has no Dotrino account yet. Create it in the «Dotrino Identity» app and come back.',
+      noProfile: 'This phone has no Dotrino profile yet. Create it right here, or adopt one you already have.',
+      noIdentityApp: 'Your Dotrino profile lives in the «Dotrino Identity» app. Install it and come back here.',
+      createProfile: 'Create profile',
+      adoptProfile: 'Adopt a profile',
       needsSigner: 'This phone does not sign for your account, so it cannot send messages in your name.',
       connecting: 'Connecting…',
       offline: 'Offline: your messages wait and go out on their own when you are back.',

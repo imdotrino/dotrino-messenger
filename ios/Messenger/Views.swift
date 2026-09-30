@@ -11,6 +11,8 @@ struct RootView: View {
     @State private var addOpen = false
     @State private var incomingCode: String?
     @State private var addTab = "add"
+    /// Creating or adopting the first profile, inside the app (DotrinoWebSheet).
+    @State private var profileWeb: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +37,9 @@ struct RootView: View {
             // The QR link (https://messenger.dotrino.com/#add=CODE) opens with the code in place.
             if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = AddSheet.normalize(String(f[r.upperBound...])); addOpen = true }
         }
+        .fullScreenCover(isPresented: Binding(get: { profileWeb != nil }, set: { if !$0 { profileWeb = nil } })) {
+            if let u = profileWeb { DotrinoWebSheet(url: u) { profileWeb = nil; Task { await m.reboot() } } }
+        }
         .sheet(isPresented: $addOpen, onDismiss: { addTab = "add" }) { AddSheet(m: m, initial: incomingCode ?? "", tab: addTab).environmentObject(lang) }
         .id(lang.code)
     }
@@ -43,7 +48,11 @@ struct RootView: View {
         if let p = m.problem {
             VStack(spacing: 18) {
                 Text(p).foregroundColor(Palette.muted).multilineTextAlignment(.center)
-                Button(t("store.retry")) { m.problem = nil; Task { await m.boot() } }.buttonStyle(Pill(filled: true))
+                if m.noProfile {
+                    Button(t("native.createProfile")) { profileWeb = DotrinoTopbarURLs.create }.buttonStyle(Pill(filled: true))
+                    Button(t("native.adoptProfile")) { profileWeb = DotrinoTopbarURLs.adopt }.buttonStyle(Pill(filled: false))
+                }
+                Button(t("store.retry")) { m.problem = nil; Task { await m.reboot() } }.buttonStyle(Pill(filled: !m.noProfile))
             }.padding(32)
         } else if !m.booted {
             ProgressView()

@@ -105,7 +105,7 @@ class MainActivity : Activity() {
     // ---------- start ----------
 
     private fun boot() {
-        if (!IdentityRequired.check(this)) { showProblem(t("native.noProfile")); return }
+        if (!IdentityRequired.check(this)) { showProblem(t("native.noIdentityApp")); return }
         scope.launch {
             try {
                 val e = Messenger.boot(this@MainActivity)
@@ -125,21 +125,28 @@ class MainActivity : Activity() {
                 pendingCode?.let { if (e.hasNickname) openAdd(it) }
             } catch (e: Messenger.BootError) {
                 when (e.code) {
-                    "no-identity-app" -> { IdentityRequired.show(this@MainActivity); showProblem(t("native.noProfile")) }
-                    "no-profile", "no-profile-keys" -> showProblem(t("native.noProfile"))
+                    "no-identity-app" -> { IdentityRequired.show(this@MainActivity); showProblem(t("native.noIdentityApp")) }
+                    // Without a profile, it is made or adopted HERE (the app restarts with it on return).
+                    "no-profile", "no-profile-keys" -> showProblem(t("native.noProfile"), profileActions = true)
                     else -> showProblem(e.message ?: e.code)
                 }
             } catch (e: Exception) { showProblem(e.message ?: e.toString()) }
         }
     }
 
-    private fun showProblem(msg: String) {
+    private fun showProblem(msg: String, profileActions: Boolean = false) {
         val c = content ?: return
         c.removeAllViews()
         c.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(px(32), px(32), px(32), px(32))
             add(label(msg, 16f, col(R.color.m_muted)).apply { gravity = Gravity.CENTER })
-            add(pill(t("store.retry"), filled = true) { boot() }.apply { tag = "retry" }, top = 20, width = ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (profileActions) {
+                add(pill(t("native.createProfile"), filled = true) { com.dotrino.sdk.ui.DotrinoWebActivity.open(this@MainActivity, com.dotrino.sdk.ui.DotrinoTopbar.CREATE_URL) }
+                    .apply { tag = "create-profile" }, top = 20, width = ViewGroup.LayoutParams.WRAP_CONTENT)
+                add(pill(t("native.adoptProfile")) { com.dotrino.sdk.ui.DotrinoWebActivity.open(this@MainActivity, com.dotrino.sdk.ui.DotrinoTopbar.ADOPT_URL) }
+                    .apply { tag = "adopt-profile" }, top = 12, width = ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+            add(pill(t("store.retry"), filled = !profileActions) { boot() }.apply { tag = "retry" }, top = 20, width = ViewGroup.LayoutParams.WRAP_CONTENT)
         }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
