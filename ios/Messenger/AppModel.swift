@@ -94,6 +94,8 @@ final class AppModel: ObservableObject {
             if p.vault != nil {
                 backup = VaultBackup(profile: p, store: store, owns: { $0.hasPrefix("{") })
                 peersBackup = PeerBookBackup(profile: p, book: peers)
+                // A contact added, removed or renamed here goes to the vault right away.
+                peers.onChange = { [weak self] in Task { @MainActor in self?.syncSoon(1.5) } }
             }
             let threads = MessengerThreads(store) { [weak self] in Task { @MainActor in self?.syncSoon(1.5) } }
             let e = MessengerEngine(transport: s, profile: p, peers: peers, threads: threads, kv: DefaultsKv(account: account),

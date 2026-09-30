@@ -85,6 +85,8 @@ object Messenger {
                 } catch (e: Exception) { backupError = (e as? VaultBackup.BackupError)?.code ?: e.message; android.util.Log.w("messenger", "vault backup", e) }
             }
         }
+        // A contact added, removed or renamed here goes to the vault right away, not at the next round.
+        if (peersBackup != null) peers.onChange = { syncSoon(1_500) }
         val e = MessengerEngine(
             SessionTransport(s), p, peers,
             MessengerThreads(store) { syncSoon(1_500) },
