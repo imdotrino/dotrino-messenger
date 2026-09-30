@@ -1,12 +1,12 @@
 package com.dotrino.messenger
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import com.dotrino.messenger.engine.MessengerEngine
+import com.dotrino.sdk.DotrinoRing
 
 /**
  * The phone's notices for a message or a request. The text of a message stays on the phone:
@@ -14,13 +14,15 @@ import com.dotrino.messenger.engine.MessengerEngine
  */
 class Notify(private val ctx: Context) {
     companion object {
-        const val CHANNEL = "messages"
+        // Mudo: el trino lo toca DotrinoRing (uno al azar). Reemplaza al viejo «messages», que
+        // sonaba con el tono del sistema y no se puede cambiar una vez creado.
+        const val CHANNEL = "messages_trino"
         const val EXTRA_CONTACT = "contact"
     }
 
     private val nm = ctx.getSystemService(NotificationManager::class.java)
 
-    init { nm.createNotificationChannel(NotificationChannel(CHANNEL, t("native.notifChannel"), NotificationManager.IMPORTANCE_HIGH)) }
+    init { DotrinoRing.channel(ctx, CHANNEL, t("native.notifChannel"), replaces = "messages") }
 
     fun show(n: MessengerEngine.Notice) {
         val open = Intent(ctx, MainActivity::class.java).apply {
@@ -36,7 +38,7 @@ class Notify(private val ctx: Context) {
                 .setContentTitle(title).setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
                 .setAutoCancel(true).setContentIntent(pi).build())
-        }
+        }.onSuccess { DotrinoRing.play(ctx) }
     }
 
     fun clear(pubkey: String) = nm.cancel(pubkey.hashCode())

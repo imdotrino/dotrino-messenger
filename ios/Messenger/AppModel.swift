@@ -2,6 +2,7 @@ import DotrinoNative
 import DotrinoNativeUI
 import DotrinoNativeWebRTC
 import Foundation
+import UIKit
 import UserNotifications
 
 /// What the screens show, on the main thread: a snapshot of the engine, refreshed on every
@@ -147,6 +148,10 @@ final class AppModel: ObservableObject {
         c.title = n.kind == "request" ? t("native.notifRequest", ["name": n.fromNickname]) : n.fromNickname
         c.body = n.kind == "request" ? t("requests.defaultMsg") : n.text
         c.userInfo = ["contact": n.fromPubkey]
+        // EL TRINO. Con la app a la vista iOS no enseña este aviso ni lo hace sonar: lo toca la
+        // app. Si no, va en el aviso (uno al azar, instalados por DotrinoPush).
+        if UIApplication.shared.applicationState == .active { DotrinoRing.play() }
+        else { c.sound = UNNotificationSound(named: UNNotificationSoundName(DotrinoRing.randomName())) }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: n.id, content: c, trigger: nil))
     }
 }

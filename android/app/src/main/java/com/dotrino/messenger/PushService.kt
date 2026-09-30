@@ -46,6 +46,6 @@ class PushService : FirebaseMessagingService() {
                 .setSmallIcon(R.drawable.messenger_brand)
                 .setContentTitle(t("native.pushTitle")).setContentText(t("native.pushBody"))
                 .setAutoCancel(true).setContentIntent(open).build())
-        }
+        }.onSuccess { com.dotrino.sdk.DotrinoRing.play(this) }
     }
 }
