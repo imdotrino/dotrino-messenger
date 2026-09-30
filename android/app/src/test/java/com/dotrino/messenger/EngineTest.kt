@@ -77,7 +77,12 @@ class EngineTest {
                 to.listeners.forEach { it(SealedSession.Message(token, claimed, o.payload, o.senderEncPub, false, null)) }
             }
             suspend fun raw(to: Phone, payload: JsonObject) = deliverTo(to, payload, emptyList())
-            override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>) = deliverTo(byToken.getValue(token), payload, recipientEncPubs)
+            /** By token from a token the other side has not greeted: it arrives WITHOUT the pubkey. */
+            suspend fun unannounced(to: Phone, payload: JsonObject) {
+                val o = to.sealing.open(sealing.seal(payload, listOf(to.profile.encPub)))
+                to.listeners.forEach { it(SealedSession.Message(token, null, o.payload, o.senderEncPub, false, null)) }
+            }
+            override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>, peerPubkey: String?) = deliverTo(byToken.getValue(token), payload, recipientEncPubs)
             override suspend fun sendSealed(pubkey: String, payload: JsonObject, recipientEncPubs: List<String>, quiet: Boolean) =
                 deliverTo(byToken.values.first { it.profile.publickey == pubkey }, payload, recipientEncPubs)
             override suspend fun encPubOf(publickey: String) = byToken.values.first { it.profile.publickey == publickey }.profile.encPub
@@ -130,6 +135,19 @@ class EngineTest {
         until("ana reads it") { ana.engine.thread(beto.pubkey).any { it["text"]!!.jsonPrimitive.content == "hola ana & ñ <b>" } }
         assertEquals(1, ana.engine.thread(beto.pubkey).size)   // only the message; the request left no trace
         until("the ack reaches beto") { beto.engine.thread(ana.pubkey).single()["pending"]!!.jsonPrimitive.content == "false" }
+    }
+
+    @Test fun aContactsMessageFromAnUngreetedTokenStillArrives() = runBlocking {
+        // After a restart the other side writes from a token we never greeted: the message comes
+        // without its pubkey. The key that sealed it says which contact it is (it was dropped).
+        val net = Net(); val ana = Person(net, "Ana"); val beto = Person(net, "Beto")
+        until("ana has a code") { ana.engine.pairingCode != null }
+        beto.engine.addByCode(ana.engine.pairingCode!!, "Anita")
+        until("ana gets the request") { ana.engine.requests().any { it.dir == "in" } }
+        ana.engine.acceptRequest(beto.pubkey)
+        until("beto sees ana") { beto.engine.contacts().isNotEmpty() }
+        beto.phone.unannounced(ana.phone, buildJsonObject { put("type", "DM"); put("text", "tras reiniciar"); put("mid", "m9"); put("ts", 1L) })
+        until("ana reads it") { ana.engine.thread(beto.pubkey).any { it["text"]!!.jsonPrimitive.content == "tras reiniciar" } }
     }
 
     @Test fun aStrangersMessageGoesNowhere() = runBlocking {

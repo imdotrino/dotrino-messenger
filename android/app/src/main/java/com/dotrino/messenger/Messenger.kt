@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import com.dotrino.sdk.DotrinoStore
 import com.dotrino.sdk.PhoneIdentity
@@ -42,8 +43,15 @@ object Messenger {
     /** Why it could not start: `no-identity-app`, `no-profile`, `no-profile-keys`, or a message. */
     class BootError(message: String, val code: String) : Exception(message)
 
+    // ONE boot at a time. `onCreate` and `onResume` both ask for it, and the first had not
+    // finished when the second arrived: two sessions came up, each with its own token, and
+    // what reached the one nobody listened to was lost.
+    private val bootLock = kotlinx.coroutines.sync.Mutex()
+
     /** Starts (once). Throws [BootError] with a code the screen turns into words. */
-    suspend fun boot(context: Context): MessengerEngine {
+    suspend fun boot(context: Context): MessengerEngine = bootLock.withLock { bootOnce(context) }
+
+    private suspend fun bootOnce(context: Context): MessengerEngine {
         engine?.let { return it }
         val ctx = context.applicationContext
         val id = identity ?: PhoneIdentity(ctx).also { identity = it }

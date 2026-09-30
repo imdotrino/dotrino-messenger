@@ -1,6 +1,8 @@
 import DotrinoNative
+import DotrinoNativeUI
 import DotrinoNativeWebRTC
 import Foundation
+import UIKit
 import UserNotifications
 
 /// What the screens show, on the main thread: a snapshot of the engine, refreshed on every
@@ -32,6 +34,15 @@ final class AppModel: ObservableObject {
     @Published var profileKey: String?
     @Published var nickname: String?
 
+    /// The APNs token arrives at the app delegate, whenever Apple gives it: kept here and handed
+    /// to the session that is running (or to the next one), which registers it with the proxy.
+    private static weak var current: AppModel?
+    private static var lastPush: SealedSession.PushToken?
+    static func pushToken(_ t: SealedSession.PushToken) {
+        lastPush = t
+        current?.session?.setPushToken(t)
+    }
+
     private(set) var engine: MessengerEngine?
     private var session: SealedSession?
     private var refreshQueued = false
@@ -50,8 +61,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// ONE boot at a time: `boot` awaits inside, so a second call (the view's `.task` running
+    /// again) could come in halfway and start a second session with its own token — and what
+    /// reached the one nobody listened to was lost. Same fix as Android's `Messenger.boot`.
+    private var booting = false
+
     func boot() async {
-        if engine != nil { return }
+        if engine != nil || booting { return }
+        booting = true
+        defer { booting = false }
         do {
             let p = try Profile.fromPhone()
             let s = SealedSession(urls: Self.proxies, profile: p, app: "messenger")
@@ -75,7 +93,9 @@ final class AppModel: ObservableObject {
             if backup != nil {
                 Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
             }
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            Self.current = self
+            if let t = Self.lastPush { s.setPushToken(t) }
+            DotrinoPush.register()
             await refresh()
         } catch let e as Profile.ProfileError {
             problem = t("native.noProfile") + (e.code == "no-profile" ? "" : " (\(e.code))")
@@ -135,6 +155,10 @@ final class AppModel: ObservableObject {
         c.title = n.kind == "request" ? t("native.notifRequest", ["name": n.fromNickname]) : n.fromNickname
         c.body = n.kind == "request" ? t("requests.defaultMsg") : n.text
         c.userInfo = ["contact": n.fromPubkey]
+        // EL TRINO. Con la app a la vista iOS no enseña este aviso ni lo hace sonar: lo toca la
+        // app. Si no, va en el aviso (uno al azar, instalados por DotrinoPush).
+        if UIApplication.shared.applicationState == .active { DotrinoRing.play() }
+        else { c.sound = UNNotificationSound(named: UNNotificationSoundName(DotrinoRing.randomName())) }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: n.id, content: c, trigger: nil))
     }
 }

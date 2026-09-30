@@ -32,7 +32,7 @@ final class EngineTests: XCTestCase {
             let m = SealedSession.Message(fromToken: token, fromPubkey: profile.publickey, payload: o.payload, senderEncPub: o.senderEncPub, queued: false, queuedAt: nil)
             to.listeners.values.forEach { $0(m) }
         }
-        func sendSealed(toToken token: String, _ payload: JSON, recipientEncPubs: [String]) async throws { try deliver(to: net.phones[token]!, payload, recipientEncPubs) }
+        func sendSealed(toToken token: String, _ payload: JSON, recipientEncPubs: [String], peerPubkey: String?) async throws { try deliver(to: net.phones[token]!, payload, recipientEncPubs) }
         func sendSealed(toPubkey pubkey: String, _ payload: JSON, recipientEncPubs: [String], quiet: Bool) async throws {
             try deliver(to: net.phones.values.first { $0.profile.publickey == pubkey }!, payload, recipientEncPubs)
         }

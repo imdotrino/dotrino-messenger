@@ -4,7 +4,7 @@
 // Android (assets) y para iOS (recurso del bundle).
 //
 //   node scripts/native-i18n.mjs
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { messages } from '../src/i18n.js'
 
 export const TARGETS = ['../android/app/src/main/assets/i18n.json', '../ios/Messenger/i18n.json']
@@ -27,8 +27,22 @@ export function build () {
   return JSON.stringify(out, null, 1) + '\n'
 }
 
+// El timbre de iOS: el proxio manda solo las claves DOTRINO_RING_TITLE / DOTRINO_RING_BODY
+// (ningún texto viaja por Apple) y el teléfono las traduce con el Localizable.strings de la app.
+const q = (s) => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+export function ringStrings (lang) {
+  const n = messages[lang].native
+  return `/* Generado por scripts/native-i18n.mjs desde src/i18n.js: no se edita a mano. */\n` +
+    `"DOTRINO_RING_TITLE" = ${q(n.pushTitle)};\n"DOTRINO_RING_BODY" = ${q(n.pushBody)};\n`
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const text = build()
   for (const t of TARGETS) writeFileSync(new URL(t, import.meta.url), text)
-  console.log(`i18n.json → ${TARGETS.join(', ')}`)
+  for (const lang of Object.keys(messages)) {
+    const dir = new URL(`../ios/Messenger/${lang}.lproj/`, import.meta.url)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(new URL('Localizable.strings', dir), ringStrings(lang))
+  }
+  console.log(`i18n.json → ${TARGETS.join(', ')}; Localizable.strings → ios/Messenger/{${Object.keys(messages)}}.lproj`)
 }

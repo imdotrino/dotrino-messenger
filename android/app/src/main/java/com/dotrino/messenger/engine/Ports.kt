@@ -10,8 +10,12 @@ import kotlinx.serialization.json.JsonObject
  * so the engine is tested in the JVM with two engines wired to each other, without a proxy.
  */
 interface Transport {
-    /** Sealed by token (live; can go direct). Empty keys = the ones the identity announced. */
-    suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String> = emptyList())
+    /**
+     * Sealed by token (live; can go direct). Empty keys = the ones the identity announced.
+     * [peerPubkey]: whose the token is — if it is dead (they restarted), the same envelope goes
+     * to their queue instead of being lost.
+     */
+    suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String> = emptyList(), peerPubkey: String? = null)
     /** Sealed by pubkey (the offline queue). */
     suspend fun sendSealed(pubkey: String, payload: JsonObject, recipientEncPubs: List<String> = emptyList(), quiet: Boolean = false)
     suspend fun encPubOf(publickey: String): String
@@ -27,7 +31,7 @@ interface Transport {
 
 /** The sealed session as the engine's transport. */
 class SessionTransport(private val s: SealedSession) : Transport {
-    override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>) = s.sendSealedTo(token, payload, recipientEncPubs)
+    override suspend fun sendSealedTo(token: String, payload: JsonObject, recipientEncPubs: List<String>, peerPubkey: String?) = s.sendSealedTo(token, payload, recipientEncPubs, peerPubkey)
     override suspend fun sendSealed(pubkey: String, payload: JsonObject, recipientEncPubs: List<String>, quiet: Boolean) = s.sendSealed(pubkey, payload, recipientEncPubs, quiet)
     override suspend fun encPubOf(publickey: String) = s.encPubOf(publickey)
     override fun pubkeyOfToken(token: String) = s.pubkeyOfToken(token)

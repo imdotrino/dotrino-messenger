@@ -4,6 +4,8 @@ import SwiftUI
 
 @main
 struct MessengerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
     init() {
         // Before any key or store: the phone's Dotrino apps share keychain and files
         // (dotrino-native/docs/DISENO.md §2.1). Without the groups it stops here, instead of
@@ -15,6 +17,17 @@ struct MessengerApp: App {
     }
 
     var body: some Scene { WindowGroup { RootView() } }
+}
+
+/// Only for what SwiftUI has no hook for: the APNs token, which the ring needs.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
+        let t = DotrinoPush.token(token)
+        Task { @MainActor in AppModel.pushToken(t) }
+    }
+    func application(_ app: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("messenger: APNs registration failed:", error)
+    }
 }
 
 /// «Cool & Cozy», the home's and the PWA's (src/style.css :root). The same as colors.xml.

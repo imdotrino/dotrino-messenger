@@ -173,7 +173,7 @@ class MessengerEngine(
         // If they already asked me, this is an acceptance: both sides want it.
         if (loadRequests().any { it.pubkey == pubkey && it.dir == "in" }) { acceptRequest(pubkey); return }
         val payload = JsonObject(whoAmI() + ("type" to JsonPrimitive("CONTACT_REQUEST")))
-        if (token != null) transport.sendSealedTo(token, payload) else transport.sendSealed(pubkey, payload)
+        if (token != null) transport.sendSealedTo(token, payload, peerPubkey = pubkey) else transport.sendSealed(pubkey, payload)
         upsertRequest(Request(pubkey, "out", sanitizeNickname(alias), token, null, now()))
         changed()
     }
@@ -243,7 +243,7 @@ class MessengerEngine(
     private suspend fun sendToContact(pubkey: String, payload: JsonObject, quiet: Boolean = false) {
         val keys = peers.encPubsOf(pubkey)
         val token = synchronized(online) { online[pubkey] }
-        if (token != null) transport.sendSealedTo(token, payload, keys)
+        if (token != null) transport.sendSealedTo(token, payload, keys, pubkey)
         else transport.sendSealed(pubkey, payload, keys, quiet)
     }
 
@@ -316,7 +316,13 @@ class MessengerEngine(
      * one I know for that contact, or the one that identity announced signed.
      */
     private suspend fun authenticate(m: SealedSession.Message): Who? {
-        val claimed = m.fromPubkey ?: return null
+        // By token after a restart the sender's pubkey may be unknown (we have not greeted that
+        // new token yet). The key that SEALED it says which contact it is, as in the PWA; and if
+        // it is nobody's we know, the token is asked who it is. Before, it was dropped in silence.
+        val claimed = m.fromPubkey
+            ?: peers.contacts().firstOrNull { c -> peers.encPubsOf(str(c, "publickey")!!).any { sameKey(it, m.senderEncPub) } }?.let { str(it, "publickey") }
+            ?: m.fromToken?.let { t -> runCatching { transport.whoIs(t) }.getOrNull() }
+            ?: run { onWarn("message from a token nobody said whose it is — dropped", null); return null }
         val contact = findBySender(claimed)
         if (contact != null && peers.encPubsOf(str(contact, "publickey")!!).any { sameKey(it, m.senderEncPub) }) {
             return Who(str(contact, "publickey")!!, contact, m.senderEncPub)

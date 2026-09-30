@@ -50,6 +50,9 @@ targets:
       properties:
         keychain-access-groups: ["$(AppIdentifierPrefix)com.dotrino.shared"]
         com.apple.security.application-groups: [group.com.dotrino]
+        # The ring (APNs). `development` here; the export to TestFlight/App Store rewrites it
+        # to `production`, and DotrinoPush reads which one the build carries.
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dotrino.messenger
