@@ -44,7 +44,7 @@ android {
         applicationId = "com.dotrino.messenger"
         minSdk = 31
         targetSdk = 36
-        versionCode = 9
+        versionCode = 10
         versionName = "0.3.2"
     }
 

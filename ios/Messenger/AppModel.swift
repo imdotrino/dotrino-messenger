@@ -190,7 +190,7 @@ final class AppModel: ObservableObject {
         // EL TRINO. Con la app a la vista iOS no enseña este aviso ni lo hace sonar: lo toca la
         // app. Si no, va en el aviso (uno al azar, instalados por DotrinoPush).
         if UIApplication.shared.applicationState == .active { DotrinoRing.play() }
-        else { c.sound = UNNotificationSound(named: UNNotificationSoundName(DotrinoRing.randomName())) }
+        else { c.sound = UNNotificationSound(named: UNNotificationSoundName(DotrinoRing.soundName)) }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: n.id, content: c, trigger: nil))
     }
 }
