@@ -88,6 +88,9 @@ object Messenger {
             kv, BuildConfig.VERSION_NAME, Reputation(p, peers),
         )
         engineRef = e
+        // YOUR NAME IS THE PROFILE'S: without a nickname of its own yet, the messenger takes the
+        // profile's name instead of asking for one (the person already said what to be called).
+        if (!e.hasNickname) p.name?.let { e.nickname = it }
         if (backup != null) scope.launch { while (true) { syncSoon(0); delay(5 * 60_000) } }
         e.onWarn = { w, t -> android.util.Log.w("messenger", w, t) }
         e.start()

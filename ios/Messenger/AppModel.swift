@@ -90,6 +90,8 @@ final class AppModel: ObservableObject {
             await e.setHandlers(onChange: { [weak self] in Task { @MainActor in self?.refreshSoon() } },
                                 onNotice: { n in Task { @MainActor in AppModel.notify(n) } })
             _ = s.onStatus { [weak self] st in Task { @MainActor in self?.status = st.state } }
+            // YOUR NAME IS THE PROFILE'S: without a nickname of its own yet, it takes the profile's name.
+            if await !e.hasNickname, let n = p.name { await e.setNickname(n) }
             await e.start()
             s.start()
             engine = e; session = s; booted = true; profileKey = p.profileId
