@@ -45,7 +45,7 @@ android {
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "0.3.0"
+        versionName = "0.3.1"
     }
 
     // La MISMA llave que la app de identidad (Play App Signing «misma llave que otra app»): su
