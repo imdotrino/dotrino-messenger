@@ -69,6 +69,8 @@ object Messenger {
         // THE BACKUP IN THE VAULT (when this phone is paired): the history reaches the PWA of the
         // same account and back. Only the messenger's threads: the contacts' keys.
         val backup = p.vault?.let { VaultBackup(p, store) { k -> k.startsWith("{") } }
+        // THE CONTACT BOOK too: the same contacts on every device of the profile (`identity.peers`).
+        val peersBackup = p.vault?.let { com.dotrino.sdk.PeerBookBackup(p, peers) }
         var engineRef: MessengerEngine? = null
         fun syncSoon(wait: Long) {
             if (backup == null) return
@@ -77,8 +79,9 @@ object Messenger {
                 delay(wait)
                 try {
                     val r = backup.sync()
+                    val contacts = peersBackup?.sync() ?: 0
                     backupError = null
-                    if (r.changed.isNotEmpty()) engineRef?.onChange?.invoke()
+                    if (r.changed.isNotEmpty() || contacts > 0) engineRef?.onChange?.invoke()
                 } catch (e: Exception) { backupError = (e as? VaultBackup.BackupError)?.code ?: e.message; android.util.Log.w("messenger", "vault backup", e) }
             }
         }

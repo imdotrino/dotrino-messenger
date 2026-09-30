@@ -53,6 +53,7 @@ final class AppModel: ObservableObject {
     private var backup: VaultBackup?
     private var backupTask: Task<Void, Never>?
     private var backupLoop: Task<Void, Never>?
+    private var peersBackup: PeerBookBackup?
 
     /// Reconcile with the vault in [delay] seconds (a moment after a write, or now).
     func syncSoon(_ delay: Double) {
@@ -61,7 +62,12 @@ final class AppModel: ObservableObject {
         backupTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             if Task.isCancelled { return }
-            do { if !(try await backup.sync()).changed.isEmpty { await self?.refresh() } }
+            do {
+                let r = try await backup.sync()
+                // THE CONTACT BOOK too: the same contacts on every device of the profile.
+                let contacts = try await self?.peersBackup?.sync() ?? 0
+                if !r.changed.isEmpty || contacts > 0 { await self?.refresh() }
+            }
             catch { print("messenger: vault backup failed:", error) }
         }
     }
@@ -85,7 +91,10 @@ final class AppModel: ObservableObject {
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
             // THE BACKUP IN THE VAULT (when paired): the history reaches the PWA of the same
             // account and back. Only the messenger's threads: the contacts' keys.
-            if p.vault != nil { backup = VaultBackup(profile: p, store: store, owns: { $0.hasPrefix("{") }) }
+            if p.vault != nil {
+                backup = VaultBackup(profile: p, store: store, owns: { $0.hasPrefix("{") })
+                peersBackup = PeerBookBackup(profile: p, book: peers)
+            }
             let threads = MessengerThreads(store) { [weak self] in Task { @MainActor in self?.syncSoon(1.5) } }
             let e = MessengerEngine(transport: s, profile: p, peers: peers, threads: threads, kv: DefaultsKv(account: account),
                                     version: version, reputation: Reputation(profile: p, peers: peers))
@@ -117,7 +126,7 @@ final class AppModel: ObservableObject {
         await engine?.stop()
         session?.close()
         backupTask?.cancel(); backupLoop?.cancel()
-        engine = nil; session = nil; backup = nil; booted = false; noProfile = false
+        engine = nil; session = nil; backup = nil; peersBackup = nil; booted = false; noProfile = false
         contacts = []; requests = []; messages = []; open = nil; code = nil; problem = nil
         profileKey = nil; topbarProfile = nil; nickname = nil; hasNickname = false
         await boot()
