@@ -6,7 +6,9 @@ import { key as accountKey } from '../services/account'
 import { sanitizeNickname } from '../utils/sanitize'
 
 export const useConnectionStore = defineStore('connection', () => {
-  const wsProxyClient = getWebSocketProxyClient()
+  // Esta app es `messenger`: en el teléfono la llave es de todas las apps de Dotrino, y el
+  // proxio necesita saber a cuál despertar y a cuál darle su cola (websocket-proxy ≥ 1.4.0).
+  const wsProxyClient = getWebSocketProxyClient({ app: 'messenger' })
 
   const token = ref(null)
   const isConnected = ref(false)
@@ -229,7 +231,7 @@ export const useConnectionStore = defineStore('connection', () => {
   const sendSealedTo = (token, payload, opts = {}) => wsProxyClient.sendSealedTo(token, payload, opts)
   /** @param {string} pubkey @param {any} payload @param {{ peerEncPub?: string, quiet?: boolean }} [opts] */
   const sendSealed = (pubkey, payload, { peerEncPub, quiet } = {}) =>
-    wsProxyClient.sendSealed([pubkey], payload, { ...(peerEncPub ? { peerEncPub } : {}), ...(quiet ? { quiet: true } : {}) })
+    wsProxyClient.sendSealed([pubkey], payload, { app: 'messenger', ...(peerEncPub ? { peerEncPub } : {}), ...(quiet ? { quiet: true } : {}) })
   /** La llave de cifrado de una identidad, VERIFICADA contra su firma. Lanza con `code`. */
   const encPubOf = (pubkey) => wsProxyClient.encPubOf(pubkey)
   /** De quién es este token, según su saludo del transporte (no autentica). */
