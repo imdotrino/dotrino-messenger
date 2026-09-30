@@ -4,7 +4,8 @@ import Foundation
 /// What the engine needs from the transport: the sealed session of dotrino-native. A protocol so
 /// the engine is tested with two engines wired to each other. Same as `Ports.kt`.
 protocol Transport: AnyObject {
-    func sendSealed(toToken token: String, _ payload: JSON, recipientEncPubs: [String]) async throws
+    /// `peerPubkey`: whose the token is — if it is dead (they restarted), the same envelope goes to their queue.
+    func sendSealed(toToken token: String, _ payload: JSON, recipientEncPubs: [String], peerPubkey: String?) async throws
     func sendSealed(toPubkey pubkey: String, _ payload: JSON, recipientEncPubs: [String], quiet: Bool) async throws
     func encPubOf(_ publickey: String) async throws -> String
     func whoIs(_ token: String) async throws -> String?
@@ -204,7 +205,7 @@ actor MessengerEngine {
     private func sendContactRequest(token: String?, pubkey: String, alias: String) async throws {
         if loadRequests().contains(where: { $0.pubkey == pubkey && $0.dir == "in" }) { await acceptRequest(pubkey); return }
         let payload = whoAmI("CONTACT_REQUEST")
-        if let token { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: []) }
+        if let token { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: [], peerPubkey: pubkey) }
         else { try await transport.sendSealed(toPubkey: pubkey, payload, recipientEncPubs: [], quiet: false) }
         upsertRequest(Request(pubkey: pubkey, dir: "out", nickname: Self.sanitizeNickname(alias), token: token, encryptionPubkey: nil, ts: nowMs()))
         onChange()
@@ -270,7 +271,7 @@ actor MessengerEngine {
     /// Sealed to EVERY key I know of the contact; by token if online, by pubkey if not.
     private func sendToContact(_ pubkey: String, _ payload: JSON, quiet: Bool = false) async throws {
         let keys = (try? peers.encPubsOf(pubkey)) ?? []
-        if let token = online[pubkey] { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: keys) }
+        if let token = online[pubkey] { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: keys, peerPubkey: pubkey) }
         else { try await transport.sendSealed(toPubkey: pubkey, payload, recipientEncPubs: keys, quiet: quiet) }
     }
 
