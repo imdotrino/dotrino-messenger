@@ -330,7 +330,15 @@ actor MessengerEngine {
     private struct Who { let pubkey: String; let contact: JSON?; let encPub: String }
 
     private func authenticate(_ m: SealedSession.Message) async -> Who? {
-        guard let claimed = m.fromPubkey else { return nil }
+        // By token after a restart the sender's pubkey may be unknown (that new token has not
+        // been greeted). The key that SEALED it says which contact it is, as in the PWA; and if it
+        // is nobody's we know, the token is asked who it is. Before, it was dropped in silence.
+        var claimed = m.fromPubkey
+        if claimed == nil {
+            claimed = contacts().first { c in ((try? peers.encPubsOf(c["publickey"]?.string ?? "")) ?? []).contains { same($0, m.senderEncPub) } }?["publickey"]?.string
+        }
+        if claimed == nil, let t = m.fromToken { claimed = try? await transport.whoIs(t) }
+        guard let claimed else { print("messenger: message from a token nobody said whose it is — dropped"); return nil }
         let contact = findBySender(claimed)
         if let c = contact, let pk = c["publickey"]?.string, ((try? peers.encPubsOf(pk)) ?? []).contains(where: { same($0, m.senderEncPub) }) {
             return Who(pubkey: pk, contact: c, encPub: m.senderEncPub)

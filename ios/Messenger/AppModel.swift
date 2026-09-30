@@ -61,8 +61,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// ONE boot at a time: `boot` awaits inside, so a second call (the view's `.task` running
+    /// again) could come in halfway and start a second session with its own token — and what
+    /// reached the one nobody listened to was lost. Same fix as Android's `Messenger.boot`.
+    private var booting = false
+
     func boot() async {
-        if engine != nil { return }
+        if engine != nil || booting { return }
+        booting = true
+        defer { booting = false }
         do {
             let p = try Profile.fromPhone()
             let s = SealedSession(urls: Self.proxies, profile: p, app: "messenger")
