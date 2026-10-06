@@ -156,6 +156,8 @@ export const useContactsStore = defineStore('contacts', () => {
     return computeDerivedRating(peerFor(pubkey), trustMap.value)
   }
   const myRatingFor = (pubkey) => peerFor(pubkey)?.myRating?.rating ?? null
+  /** Bloqueado por mí (privado, en el libro de contactos; identity ≥ 0.108). */
+  const isBlocked = (pubkey) => peerFor(pubkey)?.blocked === true
 
   // Reputación de la NUBE ponderada por mi web-of-trust (rellena el cold-start
   // con lo que dice mi red, no solo lo que recibí por el proxy). Async → para
@@ -175,6 +177,6 @@ export const useContactsStore = defineStore('contacts', () => {
     addContact, updateContact, removeContact,
     findByPubkey, findByToken, findBySender, cardOf, peerFor,
     markOnline, markOffline, isOnline, tokenFor, liveTokenFor,
-    ratePeer, ratingFor, myRatingFor, cloudReputationFor, myIndicatorsFor
+    ratePeer, ratingFor, myRatingFor, isBlocked, cloudReputationFor, myIndicatorsFor
   }
 })

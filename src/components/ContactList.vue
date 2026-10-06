@@ -31,7 +31,8 @@ const items = computed(() => {
         lastText: last?.text || null,
         lastTs: last?.ts || c.lastSeen,
         unread: thread.filter(e => e.dir === 'in' && !e._read).length,
-        rating: r
+        rating: r,
+        blocked: contacts.isBlocked(c.publickey)
       }
     })
     .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0))
@@ -78,6 +79,7 @@ const fmtTime = (ts) => {
       <div class="body">
         <div class="row1">
           <span class="name">{{ c.nickname }}</span>
+          <span v-if="c.blocked" class="blocked" data-testid="contact-blocked">{{ t.list.blocked }}</span>
           <span class="time">{{ fmtTime(c.lastTs) }}</span>
         </div>
         <div class="row2">
@@ -153,6 +155,10 @@ const fmtTime = (ts) => {
   flex: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text);
+}
+.blocked {
+  font-size: 11px; font-weight: 600; flex-shrink: 0;
+  color: var(--danger, #c0392b); border: 1px solid currentColor; border-radius: 999px; padding: 1px 7px;
 }
 .time {
   font-size: 11px;

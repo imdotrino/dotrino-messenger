@@ -100,7 +100,7 @@ const grouped = computed(() => {
           </span>
         </div>
       </div>
-      <button class="rate-btn" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
+      <button class="rate-btn" data-testid="rate-contact" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
     </header>
 
     <div v-if="compat" class="compat-note" role="status">{{ t.conv.compat[compat] }}</div>

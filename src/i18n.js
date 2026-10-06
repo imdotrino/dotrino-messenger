@@ -111,6 +111,7 @@ export const messages = {
       rate: 'Calificar',
       noMessages: 'Sin mensajes',
       ratingMine: 'Tu calificación',
+      blocked: 'Bloqueado',
       ratingDerived: 'Calificación estimada a partir de tu red de confianza',
     },
 
@@ -251,6 +252,7 @@ export const messages = {
       rate: 'Rate',
       noMessages: 'No messages',
       ratingMine: 'Your rating',
+      blocked: 'Blocked',
       ratingDerived: 'Rating estimated from your trust network',
     },
 

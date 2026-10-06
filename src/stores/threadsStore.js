@@ -357,6 +357,9 @@ export const useThreadsStore = defineStore('threads', () => {
     if (!meta.sealed) return
     const who = await authenticate(fromToken, meta)
     if (!who) return
+    // BLOQUEADO (indicador privado de la tarjeta de perfil): no entra nada suyo, ni mensajes
+    // ni solicitudes, y no se le contesta — tampoco el acuse, que le diría que llegó.
+    if (contacts.isBlocked(who.pubkey) || (meta.fromPubkey && contacts.isBlocked(meta.fromPubkey))) return
     switch (payload.type) {
       case 'CONTACT_REQUEST': return handleContactRequest(fromToken, who, payload)
       case 'CONTACT_ACCEPT':  return handleContactAccept(fromToken, who, payload)

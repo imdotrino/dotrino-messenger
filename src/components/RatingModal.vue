@@ -32,6 +32,8 @@ const online = computed(() => contacts.isOnline(props.pubkey))
 const onClose = () => emit('close')
 const onRate = () => { contacts.refresh(); contacts.refreshPeers() }
 const onRefresh = () => threads.askRatingsAbout(props.pubkey)
+// Bloquear se aplica ya en la bóveda: hay que releer el libro para que el filtro lo vea.
+const onBlock = () => { contacts.refreshPeers() }
 
 onMounted(async () => {
   contacts.refreshPeers()
@@ -41,6 +43,7 @@ onMounted(async () => {
   node.addEventListener('cc-profile-close', onClose)
   node.addEventListener('cc-profile-rate', onRate)
   node.addEventListener('cc-profile-refresh', onRefresh)
+  node.addEventListener('cc-profile-block', onBlock)
   try {
     const [identity, reputation] = await Promise.all([getIdentity(), getReputation()])
     node.provider = createVaultProfileProvider({ identity, reputation })
@@ -53,6 +56,7 @@ onBeforeUnmount(() => {
   node.removeEventListener('cc-profile-close', onClose)
   node.removeEventListener('cc-profile-rate', onRate)
   node.removeEventListener('cc-profile-refresh', onRefresh)
+  node.removeEventListener('cc-profile-block', onBlock)
 })
 </script>
 

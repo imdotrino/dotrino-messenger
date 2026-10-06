@@ -120,6 +120,60 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
   }
 })
 
+/**
+ * BLOQUEAR (indicador privado de la tarjeta, aparte de las estrellas): lo que manda alguien
+ * bloqueado no llega, y al desbloquear vuelve a llegar. Se bloquea DESDE LA TARJETA, como lo
+ * haría una persona.
+ */
+test('lo de alguien bloqueado no llega; al desbloquear, sí', async () => {
+  test.setTimeout(240_000)
+  const browser = await chromium.launch()
+  const ana = await entrar(browser, `Ana${marca}B`)
+  const beto = await entrar(browser, `Beto${marca}B`)
+  try {
+    const codigoAna = await codigoDe(ana)
+    await beto.page.getByTestId('add-contact').click()
+    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('send-hello').click()
+    await aceptarSolicitud(ana)
+    await abrirConversacion(ana)
+    await abrirConversacion(beto)
+
+    // Antes de bloquear, llega: si no, la prueba no prueba nada.
+    const antes = `antes ${marca}`
+    await escribir(beto, antes)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: antes })).toBeVisible({ timeout: ESPERA })
+
+    // Ana lo bloquea desde la tarjeta.
+    await ana.page.getByTestId('rate-contact').click()
+    const toggle = ana.page.locator('dotrino-profile').getByTestId('profile-block-toggle')
+    await toggle.waitFor({ timeout: ESPERA })
+    await toggle.click()
+    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).toHaveClass(/\bon\b/, { timeout: ESPERA })
+    await ana.page.keyboard.press('Escape')
+    await expect(ana.page.getByTestId('contact-blocked')).toBeVisible({ timeout: ESPERA })
+
+    const bloqueado = `bloqueado ${marca}`
+    await escribir(beto, bloqueado)
+    await ana.page.waitForTimeout(15_000)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: bloqueado })).toHaveCount(0)
+
+    // Desbloquea, y lo siguiente vuelve a llegar.
+    await ana.page.getByTestId('rate-contact').click()
+    await toggle.waitFor({ timeout: ESPERA })
+    await toggle.click()
+    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).not.toHaveClass(/\bon\b/, { timeout: ESPERA })
+    await ana.page.keyboard.press('Escape')
+    const despues = `despues ${marca}`
+    await escribir(beto, despues)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: despues })).toBeVisible({ timeout: ESPERA })
+  } finally {
+    await ana.context.close().catch(() => {})
+    await beto.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
 test('tocar el código de la barra abre «Mi código» con el mismo código y su QR', async () => {
   test.setTimeout(120_000)
   const browser = await chromium.launch()
