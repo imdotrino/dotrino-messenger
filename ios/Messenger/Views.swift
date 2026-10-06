@@ -395,7 +395,6 @@ struct RateSheet: View {
                 }
             }
             // BLOCK: a flag apart from the stars, private, applied at once (not part of «Save»).
-            Text(t("native.blocked")).font(.footnote.bold()).foregroundColor(Palette.muted)
             Text(t(blocked ? "native.blockedHint" : "native.blockHint")).font(.footnote).foregroundColor(Palette.muted)
             Button(t(blocked ? "native.unblock" : "native.block")) {
                 blocking = true

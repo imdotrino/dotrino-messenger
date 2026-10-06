@@ -41,9 +41,8 @@ class RateSheet(private val a: MainActivity, private val e: MessengerEngine, pri
                 }
             }.apply { tag = "rate-save" }, top = 20)
             // BLOCK: a flag apart from the stars, private, applied at once (not part of «Save»).
-            body.add(a.label(t("native.blocked"), 14f, a.col(R.color.m_muted), bold = true), top = 20)
             val hint = a.label("", 13f, a.col(R.color.m_muted))
-            body.add(hint, top = 4)
+            body.add(hint, top = 20)
             var blocked = runCatching { e.isBlocked(pk) }.getOrDefault(false)
             lateinit var toggle: TextView
             fun paintBlock() {
