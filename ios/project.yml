@@ -38,6 +38,10 @@ targets:
       path: Messenger/Info.plist
       properties:
         CFBundleDisplayName: Messenger
+        # La versión sale de MARKETING_VERSION / CURRENT_PROJECT_VERSION (§16.3); sin esto xcodegen
+        # escribía 1.0 (1) fijo y TestFlight recibía siempre la misma versión.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: es
         CFBundleLocalizations: [es, en]
         UILaunchScreen:
