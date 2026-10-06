@@ -162,6 +162,9 @@ actor MessengerEngine {
     // MARK: what the screen reads
 
     func contacts() -> [JSON] { (try? peers.contacts()) ?? [] }
+    /// Block or unblock someone: private, in the address book (travels to the vault), never published.
+    func setBlocked(_ pk: String, _ blocked: Bool) throws { try peers.setBlocked(pk, blocked); onChange() }
+    func isBlocked(_ pk: String) -> Bool { (try? peers.isBlocked(pk)) ?? false }
     func isOnline(_ pk: String) -> Bool { online[pk] != nil }
     func thread(_ pk: String) -> [JSON] { threads.list(pk).sorted { ($0["ts"]?.int ?? 0) < ($1["ts"]?.int ?? 0) } }
     func unread(_ pk: String) -> Int { threads.list(pk).filter { $0["dir"]?.string == "in" && $0["_read"]?.bool != true }.count }
@@ -356,6 +359,9 @@ actor MessengerEngine {
 
     private func handle(_ m: SealedSession.Message) async {
         guard let type = m.payload["type"]?.string, let who = await authenticate(m) else { return }
+        // BLOCKED (the private flag of the rating card): nothing of theirs gets in — no message,
+        // no request — and nothing is answered, not even the ack that would tell them it arrived.
+        if (try? peers.isBlocked(who.pubkey)) == true || (m.fromPubkey.map { (try? peers.isBlocked($0)) == true } ?? false) { return }
         switch type {
         case "CONTACT_REQUEST": await onContactRequest(m, who); return
         case "CONTACT_ACCEPT": await onContactAccept(m, who); return

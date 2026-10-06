@@ -311,6 +311,7 @@ class MainActivity : Activity() {
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, px(8), 0)
                 add(label(name, 16f, bold = true).apply { isSingleLine = true })
+                if ((c["blocked"] as? JsonPrimitive)?.content == "true") add(label(t("list.blocked"), 12f, col(R.color.m_danger), bold = true).apply { tag = "contact-blocked" })
                 add(label(last?.let { str(it, "text") } ?: t("list.noMessages"), 14f, col(R.color.m_muted)).apply { isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END })
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(LinearLayout(this@MainActivity).apply {

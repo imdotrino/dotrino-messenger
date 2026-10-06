@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
         let last: String?
         let lastTs: Int64
         let unread: Int
+        var blocked = false
     }
     struct Message: Identifiable, Equatable { let id: String; let mine: Bool; let text: String; let ts: Int64; let pending: Bool }
 
@@ -153,7 +154,8 @@ final class AppModel: ObservableObject {
             let th = await e.thread(pk)
             let name = c["nickname"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? String(pk.prefix(8))
             list.append(Contact(id: pk, name: name, online: await e.isOnline(pk), last: th.last?["text"]?.string,
-                                lastTs: th.last?["ts"]?.int ?? c["lastSeen"]?.int ?? 0, unread: await e.unread(pk)))
+                                lastTs: th.last?["ts"]?.int ?? c["lastSeen"]?.int ?? 0, unread: await e.unread(pk),
+                                blocked: c["blocked"]?.bool == true))
         }
         contacts = list.sorted { $0.lastTs > $1.lastTs }
         if let pk = open {
@@ -179,6 +181,8 @@ final class AppModel: ObservableObject {
     func dismiss(_ pk: String, _ dir: String) async { await engine?.dismissRequest(pk, dir: dir) }
     func rate(_ pk: String, _ v: [String: Int]) async throws { try await engine?.rate(pk, v) }
     func myIndicators(_ pk: String) async -> [String: Double] { await engine?.myIndicatorsFor(pk) ?? [:] }
+    func setBlocked(_ pk: String, _ b: Bool) async throws { try await engine?.setBlocked(pk, b) }
+    func isBlocked(_ pk: String) async -> Bool { await engine?.isBlocked(pk) ?? false }
     func askRatings(_ pk: String) async { await engine?.askRatingsAbout(pk) }
 
     /// The phone's notice for a message or a request (opened here: it arrived sealed to this phone).

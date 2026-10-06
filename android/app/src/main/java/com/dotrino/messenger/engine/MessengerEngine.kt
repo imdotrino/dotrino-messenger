@@ -122,6 +122,10 @@ class MessengerEngine(
 
     suspend fun contacts(): List<JsonObject> = peers.contacts()
 
+    /** Block or unblock someone: private, in the address book (travels to the vault), never published. */
+    suspend fun setBlocked(pubkey: String, blocked: Boolean) { withContext(engine) { peers.setBlocked(pubkey, blocked) }; changed() }
+    suspend fun isBlocked(pubkey: String): Boolean = peers.isBlocked(pubkey)
+
     fun isOnline(pubkey: String) = synchronized(online) { online.containsKey(pubkey) }
 
     fun thread(pubkey: String): List<JsonObject> = threads.list(pubkey).sortedBy { long(it, "ts") ?: 0 }
@@ -335,6 +339,9 @@ class MessengerEngine(
     private suspend fun handle(m: SealedSession.Message) {
         val type = str(m.payload, "type") ?: return
         val who = authenticate(m) ?: return
+        // BLOCKED (the private flag of the rating card): nothing of theirs gets in — no message,
+        // no request — and nothing is answered, not even the ack that would tell them it arrived.
+        if (peers.isBlocked(who.pubkey) || (m.fromPubkey?.let { peers.isBlocked(it) } == true)) return
         when (type) {
             "CONTACT_REQUEST" -> return onContactRequest(m, who)
             "CONTACT_ACCEPT" -> return onContactAccept(m, who)

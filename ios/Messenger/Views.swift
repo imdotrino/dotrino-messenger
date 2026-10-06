@@ -180,6 +180,7 @@ struct ContactsView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(c.name).bold().foregroundColor(Palette.text).lineLimit(1)
+                if c.blocked { Text(t("list.blocked")).font(.caption.bold()).foregroundColor(Palette.danger).accessibilityIdentifier("contact-blocked") }
                 Text(c.last ?? t("list.noMessages")).font(.subheadline).foregroundColor(Palette.muted).lineLimit(1)
             }
             Spacer()
@@ -377,6 +378,8 @@ struct RateSheet: View {
     let pk: String, name: String
     @State private var values = ["confianza": 0, "afinidad": 0]
     @State private var note: String?
+    @State private var blocked = false
+    @State private var blocking = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -391,6 +394,17 @@ struct RateSheet: View {
                     }
                 }
             }
+            // BLOCK: a flag apart from the stars, private, applied at once (not part of «Save»).
+            Text(t("native.blocked")).font(.footnote.bold()).foregroundColor(Palette.muted)
+            Text(t(blocked ? "native.blockedHint" : "native.blockHint")).font(.footnote).foregroundColor(Palette.muted)
+            Button(t(blocked ? "native.unblock" : "native.block")) {
+                blocking = true
+                Task {
+                    do { try await m.setBlocked(pk, !blocked); blocked.toggle() }
+                    catch { note = t("native.blockFailed", ["reason": "\(error)"]) }
+                    blocking = false
+                }
+            }.disabled(blocking).foregroundColor(blocked ? Palette.text : Palette.danger).bold().accessibilityIdentifier("block-toggle")
             if let note { Text(note).font(.footnote).foregroundColor(Palette.muted) }
             Button(t("native.rateSave")) {
                 Task {
@@ -400,8 +414,9 @@ struct RateSheet: View {
             }.buttonStyle(Pill(filled: true)).frame(maxWidth: .infinity)
         }
         .padding(24)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .task {
+            blocked = await m.isBlocked(pk)
             for (k, v) in await m.myIndicators(pk) where values[k] != nil { values[k] = Int(v) }
             await m.askRatings(pk)
         }
