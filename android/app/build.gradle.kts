@@ -44,8 +44,8 @@ android {
         applicationId = "com.dotrino.messenger"
         minSdk = 31
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.3.2"
+        versionCode = 11
+        versionName = "0.3.3"
     }
 
     // La MISMA llave que la app de identidad (Play App Signing «misma llave que otra app»): su
