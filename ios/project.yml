@@ -42,6 +42,9 @@ targets:
         # escribía 1.0 (1) fijo y TestFlight recibía siempre la misma versión.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Cifrado exento, la misma declaración que la app Dotrino (decidido por el dueño, 2026-10-05):
+        # así TestFlight no la pide en cada build.
+        ITSAppUsesNonExemptEncryption: false
         CFBundleDevelopmentRegion: es
         CFBundleLocalizations: [es, en]
         UILaunchScreen:
