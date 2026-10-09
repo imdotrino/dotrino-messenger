@@ -27,7 +27,7 @@
     "@dotrino/proxy-client": "0.28.0",
     "@dotrino/qr": "0.1.0",
     "@dotrino/reputation": "0.12.0",
-    "@dotrino/store": "0.12.2",
+    "@dotrino/store": "0.12.3",
     "@dotrino/topbar": "0.14.1",
     "@dotrino/tutorial": "0.2.0",
     "pinia": "^3.0.4",
