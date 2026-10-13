@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'node:child_process'
 import pkg from './package.json' with { type: 'json' }
+import prerender from '@dotrino/prerender/vite'
 
 // <meta name="commit"> con el hash del commit del build (CONVENCIONES-APPS §3).
 function commitMeta () {
@@ -18,6 +19,8 @@ function commitMeta () {
 
 export default defineConfig({
   plugins: [
+    // El HTML llega con contenido para quien lo lee sin ejecutar JavaScript.
+    prerender(),
     commitMeta(),
     // Los `dotrino-*` son Web Components (custom elements), no componentes
     // Vue: que el compilador no intente resolverlos como tal.
