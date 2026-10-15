@@ -55,12 +55,12 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
 </template>
 
 <style scoped>
+/* Ocupa lo que deja la barra superior, que va encima en toda pantalla (§5). */
 .welcome {
-  position: fixed; inset: 0;
+  flex: 1; min-height: 0; overflow-y: auto;
   display: flex; align-items: center; justify-content: center;
   background: var(--bg-1);
   padding: 24px;
-  z-index: 50;
 }
 .card {
   width: 100%;

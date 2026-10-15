@@ -328,12 +328,9 @@ const maybeStartTutorial = () => {
 </script>
 
 <template>
-  <!-- Boot: esperamos al getIdentity() inicial antes de decidir qué pintar. -->
-  <div v-if="booting" class="login-cta"><div class="login-card"><p>{{ t.boot.loading }}</p></div></div>
-
-  <NicknameModal v-else-if="!connection.nicknameSet" @set="handleNicknameSet" />
-
-  <div v-else class="app">
+  <!-- La barra va en TODA pantalla, también al arrancar y en la de elegir apodo (§5,
+       §6.1): sin ella no se ve de qué cuenta es lo que vas a crear o abrir. -->
+  <div class="app">
     <!-- Barra superior estándar del ecosistema (§5). Trae marca, volver, botón de
          perfil (§6.1) y la moneda de support (§6); nuestras acciones propias
          (instalar, chip de estado, campana) van por el slot "end".
@@ -358,7 +355,7 @@ const maybeStartTutorial = () => {
       @dotrino-profile="onProfileOpen"
       @dotrino-lang="onLangChange"
     >
-      <div class="status" slot="end">
+      <div v-if="!booting && connection.nicknameSet" class="status" slot="end">
         <dotrino-install class="cc-install" :lang.attr="lang"></dotrino-install>
         <div class="me">
           <span :class="['dot', connection.isConnected ? 'on' : 'off']"></span>
@@ -377,6 +374,13 @@ const maybeStartTutorial = () => {
         </button>
       </div>
     </dotrino-topbar>
+
+    <!-- Boot: esperamos al getIdentity() inicial antes de decidir qué pintar. -->
+    <div v-if="booting" class="login-cta"><div class="login-card"><p>{{ t.boot.loading }}</p></div></div>
+
+    <NicknameModal v-else-if="!connection.nicknameSet" @set="handleNicknameSet" />
+
+    <template v-else>
 
     <!-- Qué cuenta es esta. Se dice, no se disimula: el contenido de la app (nombre,
          avatar, contactos, chats) es de la cuenta activa, y si cambió hay que poder
@@ -424,6 +428,7 @@ const maybeStartTutorial = () => {
     <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal :lang.attr="lang" @cc-notif-close="showNotif = false"></dotrino-notifications>
 
     <IncomingNotification :dm="incomingNotification" @done="onIncomingDone" />
+    </template>
   </div>
 </template>
 
@@ -439,7 +444,7 @@ const maybeStartTutorial = () => {
 
 .login-cta {
   display: flex; align-items: center; justify-content: center;
-  height: 100%;
+  flex: 1; min-height: 0;
   padding: 24px;
   background: var(--bg-1);
 }
