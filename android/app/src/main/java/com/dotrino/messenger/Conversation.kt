@@ -21,6 +21,9 @@ class Conversation(
         val contact = e.contacts().firstOrNull { str(it, "publickey") == pk }
         val name = str(contact, "nickname").ifEmpty { pk.take(8) }
         val online = e.isOnline(pk)
+        // An account with no known device (Dotrino before it writes): nobody to send to. The
+        // composer is there, off, with the reason.
+        val canWrite = e.canWrite(pk)
         val root = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
 
         root.addView(LinearLayout(a).apply {
@@ -67,6 +70,12 @@ class Conversation(
                 input.setText("")
                 a.launch { runCatching { e.sendDM(pk, text) }.onFailure { a.toast(t("native.sealFailed", "reason" to (it.message ?: ""))) } }
             }
+        }
+        if (!canWrite) {
+            input.isEnabled = false; send.isEnabled = false; send.alpha = 0.4f
+            root.addView(a.label(t("conv.noDevices"), 13f, a.col(R.color.m_muted)).apply {
+                tag = "no-devices"; setBackgroundColor(a.col(R.color.m_card2)); setPadding(a.px(16), a.px(10), a.px(16), a.px(10))
+            })
         }
         root.addView(LinearLayout(a).apply {
             gravity = Gravity.CENTER_VERTICAL

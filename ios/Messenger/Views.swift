@@ -5,11 +5,35 @@ import SwiftUI
 
 /// The app: the nickname the first time; then the contacts (requests on top) and, from there,
 /// a conversation. SwiftUI, no WebView (CONVENCIONES §16.2).
+/// Whom a `#to=<key>&nick=…&card=…` link asks to add (the feedback email's, so Dotrino can
+/// answer): their key, the nickname, and their card if it came. The engine checks the card.
+struct LinkPeer: Identifiable {
+    let pubkey: String, nickname: String, card: JSON?
+    var id: String { pubkey }
+
+    static func from(_ fragment: String?) -> LinkPeer? {
+        guard let f = fragment else { return nil }
+        func param(_ k: String) -> String? {
+            f.split(separator: "&").first { $0.hasPrefix("\(k)=") }.map { String($0.dropFirst(k.count + 1)) }
+        }
+        func b64(_ s: String) -> Data? {
+            var t = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            while t.count % 4 != 0 { t += "=" }
+            return Data(base64Encoded: t)
+        }
+        guard let raw = param("to").flatMap(b64), let pubkey = String(data: raw, encoding: .utf8), (try? JSON.parse(pubkey))?.object != nil else { return nil }
+        let nick = String((param("nick")?.removingPercentEncoding ?? "").prefix(40))
+        let card = param("card").flatMap(b64).flatMap { String(data: $0, encoding: .utf8) }.flatMap { try? JSON.parse($0) }.flatMap { $0.object != nil ? $0 : nil }
+        return LinkPeer(pubkey: pubkey, nickname: nick, card: card)
+    }
+}
+
 struct RootView: View {
     @StateObject private var m = AppModel()
     @ObservedObject private var lang = DotrinoLang.shared
     @State private var addOpen = false
     @State private var incomingCode: String?
+    @State private var incomingPeer: LinkPeer?
     @State private var addTab = "add"
     /// Creating or adopting the first profile, inside the app (DotrinoWebSheet).
     @State private var profileWeb: URL?
@@ -35,12 +59,13 @@ struct RootView: View {
         .task { await m.boot() }
         .onOpenURL { url in
             // The QR link (https://messenger.dotrino.com/#add=CODE) opens with the code in place.
-            if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = AddSheet.normalize(String(f[r.upperBound...])); addOpen = true }
+            if let p = LinkPeer.from(url.fragment) { incomingCode = nil; incomingPeer = p; addOpen = true }
+            else if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = AddSheet.normalize(String(f[r.upperBound...])); addOpen = true }
         }
         .fullScreenCover(isPresented: Binding(get: { profileWeb != nil }, set: { if !$0 { profileWeb = nil } })) {
             if let u = profileWeb { DotrinoWebSheet(url: u) { profileWeb = nil; Task { await m.reboot() } } }
         }
-        .sheet(isPresented: $addOpen, onDismiss: { addTab = "add" }) { AddSheet(m: m, initial: incomingCode ?? "", tab: addTab).environmentObject(lang) }
+        .sheet(isPresented: $addOpen, onDismiss: { addTab = "add"; incomingPeer = nil }) { AddSheet(m: m, initial: incomingCode ?? "", tab: addTab, peer: incomingPeer).environmentObject(lang) }
         .id(lang.code)
     }
 
@@ -61,7 +86,7 @@ struct RootView: View {
         } else if let pk = m.open {
             ConversationView(m: m, pk: pk)
         } else {
-            ContactsView(m: m, add: { incomingCode = nil; addOpen = true })
+            ContactsView(m: m, add: { incomingCode = nil; incomingPeer = nil; addOpen = true })
         }
     }
 }
@@ -198,6 +223,9 @@ struct ConversationView: View {
     @State private var draft = ""
     @State private var rateOpen = false
     @State private var error: String?
+    /// An account with no known device (Dotrino before it writes): nobody to send to. The
+    /// composer is there, off, with the reason.
+    @State private var canWrite = true
 
     var body: some View {
         let c = m.contacts.first { $0.id == pk }
@@ -229,16 +257,23 @@ struct ConversationView: View {
                 }.onChange(of: m.messages.count) { _ in if let last = m.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
             if let error { Text(error).font(.footnote).foregroundColor(Palette.danger).padding(.horizontal) }
+            if !canWrite {
+                Text(t("conv.noDevices")).font(.footnote).foregroundColor(Palette.muted).padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading).background(Palette.card2).accessibilityIdentifier("no-devices")
+            }
             HStack(spacing: 8) {
                 TextField(t("conv.placeholder"), text: $draft, axis: .vertical).lineLimit(1...5).padding(12)
                     .background(RoundedRectangle(cornerRadius: 24).stroke(Palette.line2)).accessibilityIdentifier("composer-input")
+                    .disabled(!canWrite)
                 Button {
                     let text = draft; draft = ""
                     Task { do { try await m.send(text); error = nil } catch { self.error = t("native.sealFailed", ["reason": "\(error)"]) } }
                 } label: { Image(systemName: "paperplane.fill").foregroundColor(.white).frame(width: 46, height: 46).background(Circle().fill(Palette.accent)) }
                     .accessibilityLabel(t("conv.send")).accessibilityIdentifier("send-message")
+                    .disabled(!canWrite).opacity(canWrite ? 1 : 0.4)
             }.padding(12).background(Palette.card)
         }
+        .task(id: m.messages.count) { canWrite = await m.canWrite(pk) }
         .sheet(isPresented: $rateOpen) { RateSheet(m: m, pk: pk, name: c?.name ?? "") }
     }
 
@@ -271,9 +306,14 @@ struct AddSheet: View {
     @State private var scanning = false
     @State private var photo: PhotosPickerItem?
     @Environment(\.dismiss) private var dismiss
+    /// From a `#to=` link (the feedback email): whom to ask, with no code.
+    let peer: LinkPeer?
 
     /// [tab] "mine" = straight to «My code» (the chip of the bar: to show mine, not type theirs).
-    init(m: AppModel, initial: String, tab: String = "add") { self.m = m; _code = State(initialValue: initial); _tab = State(initialValue: tab) }
+    init(m: AppModel, initial: String, tab: String = "add", peer: LinkPeer? = nil) {
+        self.m = m; self.peer = peer
+        _code = State(initialValue: initial); _tab = State(initialValue: tab); _alias = State(initialValue: peer?.nickname ?? "")
+    }
 
     private static let confusables: [Character: Character] = ["I": "1", "L": "1", "S": "5", "Z": "2", "B": "8", "G": "6", "0": "O"]
     static func normalize(_ raw: String) -> String {
@@ -295,7 +335,7 @@ struct AddSheet: View {
                         Text(t("add.tabAdd")).tag("add")
                         Text(t("add.tabMine")).tag("mine")
                     }.pickerStyle(.segmented)
-                    if tab == "add" { addTab } else { mineTab }
+                    if tab == "add", peer != nil { toTab } else if tab == "add" { addTab } else { mineTab }
                 }.padding(20)
             }
             .navigationTitle(t("add.title")).navigationBarTitleDisplayMode(.inline)
@@ -341,6 +381,29 @@ struct AddSheet: View {
         Text(t("add.hint")).font(.footnote).foregroundColor(Palette.muted)
         Button(sending ? t("add.sending") : t("add.send")) { submit() }.buttonStyle(Pill(filled: true))
             .frame(maxWidth: .infinity).disabled(sending).accessibilityIdentifier("send-hello")
+    }
+
+    /// A request to the key of a link: who it goes to, the alias, and «send».
+    @ViewBuilder private var toTab: some View {
+        let nick = (peer?.nickname).flatMap { $0.isEmpty ? nil : $0 } ?? t("add.toNoNick")
+        Text(t("add.toInfo").replacingOccurrences(of: "{nick}", with: nick)).font(.subheadline).foregroundColor(Palette.muted).accessibilityIdentifier("to-info")
+        Text(t("add.fieldAlias")).font(.footnote.bold()).foregroundColor(Palette.muted)
+        TextField(t("add.phAlias"), text: $alias).padding(12).background(RoundedRectangle(cornerRadius: 16).stroke(Palette.line2))
+        if let error { Text(error).font(.subheadline).foregroundColor(Palette.danger) }
+        Text(t("add.hint")).font(.footnote).foregroundColor(Palette.muted)
+        Button(sending ? t("add.sending") : t("add.send")) { submitToPeer() }.buttonStyle(Pill(filled: true))
+            .frame(maxWidth: .infinity).disabled(sending).accessibilityIdentifier("send-hello")
+    }
+
+    private func submitToPeer() {
+        guard let p = peer else { return }
+        error = nil; sending = true
+        Task {
+            do { try await m.addByLink(p, alias: alias); dismiss() }
+            catch let e as MessengerEngine.EngineError { error = t(e.code == "offline" ? "add.errOffline" : "add.errSend") }
+            catch { self.error = t("add.errSend") }
+            sending = false
+        }
     }
 
     @ViewBuilder private var mineTab: some View {
@@ -395,7 +458,9 @@ struct RateSheet: View {
                 }
             }
             // BLOCK: a flag apart from the stars, private, applied at once (not part of «Save»).
-            Text(t(blocked ? "native.blockedHint" : "native.blockHint")).font(.footnote).foregroundColor(Palette.muted)
+            // Dotrino, the fixed contact, cannot be blocked: the button is there, off, with the reason.
+            let pinned = m.isPinned(pk)
+            Text(t(pinned ? "native.pinnedNoBlock" : blocked ? "native.blockedHint" : "native.blockHint")).font(.footnote).foregroundColor(Palette.muted)
             Button(t(blocked ? "native.unblock" : "native.block")) {
                 blocking = true
                 Task {
@@ -403,7 +468,7 @@ struct RateSheet: View {
                     catch { note = t("native.blockFailed", ["reason": "\(error)"]) }
                     blocking = false
                 }
-            }.disabled(blocking).foregroundColor(blocked ? Palette.text : Palette.danger).bold().accessibilityIdentifier("block-toggle")
+            }.disabled(blocking || pinned).opacity(pinned ? 0.4 : 1).foregroundColor(blocked ? Palette.text : Palette.danger).bold().accessibilityIdentifier("block-toggle")
             if let note { Text(note).font(.footnote).foregroundColor(Palette.muted) }
             Button(t("native.rateSave")) {
                 Task {

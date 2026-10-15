@@ -51,11 +51,21 @@ class MessengerEngine(
     private val version: String,
     private val reputation: Reputation? = null,
     private val now: () -> Long = System::currentTimeMillis,
+    /** The fixed contact: [DOTRINO_ACCOUNT] (another key only in tests). */
+    private val pinnedAccount: String = DOTRINO_ACCOUNT,
 ) {
     companion object {
         const val PROTOCOL = 2
         const val MAX_THREAD = 1000
         private const val REQUEST_TTL = 24 * 60 * 60 * 1000L
+
+        /**
+         * THE DOTRINO ACCOUNT: a fixed contact of every messenger, like the PWA's
+         * (`DOTRINO_ACCOUNT` in `src/stores/contactsStore.js`). Dotrino answers there what is asked
+         * by email, so it cannot be removed or blocked: if it is missing, it comes back. It is the
+         * key of the PROFILE: any of its devices writes, recognised by a card signed by this key.
+         */
+        const val DOTRINO_ACCOUNT = "{\"key_ops\":[\"verify\"],\"ext\":true,\"kty\":\"EC\",\"x\":\"McyhKieRw_Jcl3TY9EvLovL-ALzGoWqMOrfnFjT7XpA\",\"y\":\"V7tfpDWN37tPnhXnIFUlMaTepcTzzxPWTj_72PkpKPw\",\"crv\":\"P-256\"}"
         private val json = Json { ignoreUnknownKeys = true }
 
         /** `sanitizeNickname` of the PWA: trimmed, without the characters that make it ambiguous. */
@@ -77,6 +87,7 @@ class MessengerEngine(
     private val engine = Dispatchers.IO.limitedParallelism(1)
     private val scope = CoroutineScope(SupervisorJob() + engine)
     private val online = HashMap<String, String>()          // pubkey -> live token (this session)
+    private val deviceTokens = HashMap<String, String>()    // DEVICE pubkey -> live token: one per device of an account
     private val greeted = HashSet<String>()                  // tokens already greeted back
     private val outbox = mutableListOf<JsonObject>()         // { pubkey, entryId, text, ts }
     private val offs = mutableListOf<() -> Unit>()
@@ -120,11 +131,31 @@ class MessengerEngine(
 
     // ---------- what the screen reads ----------
 
-    suspend fun contacts(): List<JsonObject> = peers.contacts()
+    suspend fun contacts(): List<JsonObject> { ensurePinned(); return peers.contacts() }
 
-    /** Block or unblock someone: private, in the address book (travels to the vault), never published. */
-    suspend fun setBlocked(pubkey: String, blocked: Boolean) { withContext(engine) { peers.setBlocked(pubkey, blocked) }; changed() }
-    suspend fun isBlocked(pubkey: String): Boolean = peers.isBlocked(pubkey)
+    /** Is it the Dotrino account (the fixed contact)? */
+    fun isPinned(pubkey: String?) = sameKey(pubkey, pinnedAccount)
+
+    /**
+     * Dotrino is always among the contacts. If it was removed (here, or in another app that shares
+     * the book), it comes back — kept under the key its card brings, if it already arrived, so that
+     * contact and card are the same record.
+     */
+    private suspend fun ensurePinned() {
+        if (peers.contacts().any { isPinned(str(it, "publickey")) }) return
+        val key = peers.all().values.mapNotNull { it["card"] as? JsonObject }.firstOrNull { isPinned(str(it, "profileId")) }?.let { str(it, "profileId") } ?: pinnedAccount
+        peers.addContact(key, nickname = "Dotrino")
+    }
+
+    /** Block or unblock someone: private, in the address book (travels to the vault), never published. Not Dotrino. */
+    suspend fun setBlocked(pubkey: String, blocked: Boolean) {
+        if (isPinned(pubkey)) throw EngineError("the Dotrino account cannot be blocked", "pinned-contact")
+        withContext(engine) { peers.setBlocked(pubkey, blocked) }; changed()
+    }
+    suspend fun isBlocked(pubkey: String): Boolean = !isPinned(pubkey) && peers.isBlocked(pubkey)
+
+    /** Whether there is any device to write to (Dotrino has none until it writes first). */
+    suspend fun canWrite(pubkey: String): Boolean = recipientsOf(pubkey).isNotEmpty()
 
     fun isOnline(pubkey: String) = synchronized(online) { online.containsKey(pubkey) }
 
@@ -173,10 +204,29 @@ class MessengerEngine(
         profile.card?.let { put("card", it) }
     }
 
-    private suspend fun sendContactRequest(token: String?, pubkey: String, alias: String) {
+    /**
+     * A contact request to the key of a LINK (`#to=<key>&nick=…&card=…`, the one the feedback email
+     * carries so Dotrino can answer): no code to redeem. With their card it goes to every device of
+     * the account, sealed with the keys the card lists — they need not have published theirs.
+     */
+    suspend fun addByLink(pubkey: String, alias: String, card: JsonObject?): Unit = withContext(engine) {
+        if (!transport.isOnline) throw EngineError("not connected", "offline")
+        sendContactRequest(null, pubkey, alias, card)
+    }
+
+    private suspend fun sendContactRequest(token: String?, pubkey: String, alias: String, card: JsonObject? = null) {
         // If they already asked me, this is an acceptance: both sides want it.
-        if (loadRequests().any { it.pubkey == pubkey && it.dir == "in" }) { acceptRequest(pubkey); return }
+        if (loadRequests().any { sameKey(it.pubkey, pubkey) && it.dir == "in" }) { acceptRequest(pubkey); return }
         val payload = JsonObject(whoAmI() + ("type" to JsonPrimitive("CONTACT_REQUEST")))
+        val account = card?.let { c ->
+            runCatching { peers.adoptPeerCard(c) }.onFailure { onWarn("the card in the link could not be adopted", it) }
+            peers.accountFromCard(c, pubkey).also { if (it == null) onWarn("the card in the link does not prove that key: sending to the key alone", null) }
+        }
+        if (account != null) {
+            sendToDevices(account, payload, peers.devicesOf(account).map { it.first to listOf(it.second) })
+            upsertRequest(Request(account, "out", sanitizeNickname(alias), null, null, now()))
+            changed(); return
+        }
         if (token != null) transport.sendSealedTo(token, payload, peerPubkey = pubkey) else transport.sendSealed(pubkey, payload)
         upsertRequest(Request(pubkey, "out", sanitizeNickname(alias), token, null, now()))
         changed()
@@ -204,17 +254,19 @@ class MessengerEngine(
 
     private fun upsertRequest(r: Request) {
         val l = loadRequests().toMutableList()
-        val i = l.indexOfFirst { it.pubkey == r.pubkey && it.dir == r.dir }
+        val i = l.indexOfFirst { sameKey(it.pubkey, r.pubkey) && it.dir == r.dir }
         if (i >= 0) l[i] = r.copy(ts = l[i].ts) else l.add(0, r)
         saveRequests(l)
     }
 
     private fun removeRequests(pubkey: String, dir: String? = null) =
-        saveRequests(loadRequests().filterNot { it.pubkey == pubkey && (dir == null || it.dir == dir) })
+        saveRequests(loadRequests().filterNot { sameKey(it.pubkey, pubkey) && (dir == null || it.dir == dir) })
+
+    private fun requestOf(pubkey: String?, dir: String) = pubkey?.let { pk -> loadRequests().firstOrNull { sameKey(it.pubkey, pk) && it.dir == dir } }
 
     /** Accept a request: now we are contacts on both sides. No message enters any chat. */
     suspend fun acceptRequest(pubkey: String): Unit = withContext(engine) {
-        val r = loadRequests().firstOrNull { it.pubkey == pubkey && it.dir == "in" } ?: return@withContext
+        val r = requestOf(pubkey, "in") ?: return@withContext
         becomeContacts(pubkey, r.nickname, r.token, r.encryptionPubkey)
         r.token?.let { markOnline(pubkey, it) }
         replyAccept(pubkey)
@@ -224,13 +276,17 @@ class MessengerEngine(
     /** Dismiss an incoming request, or cancel one I sent. The other side is not told. */
     suspend fun dismissRequest(pubkey: String, dir: String): Unit = withContext(engine) { removeRequests(pubkey, dir); changed() }
 
-    private suspend fun becomeContacts(pubkey: String, nickname: String, token: String?, encPub: String?) {
-        val existing = peers.get(pubkey)
-        peers.addContact(pubkey,
+    /** [pubkey]: the key the contact is kept by (their account when their card proves it); [device]: the one that wrote. */
+    private suspend fun becomeContacts(pubkey: String, nickname: String, token: String?, encPub: String?, device: String? = null) {
+        // The same key may come written another way: it stays in the record already there.
+        val existing = peers.contacts().firstOrNull { sameKey(str(it, "publickey"), pubkey) } ?: peers.get(pubkey)
+        val key = str(existing, "publickey") ?: pubkey
+        peers.addContact(key,
             nickname = str(existing, "nickname")?.takeIf { it.isNotEmpty() } ?: nickname.ifEmpty { pubkey.take(8) },
             encryptionPubkey = encPub ?: str(existing, "encryptionPubkey"),
             lastToken = token)
-        removeRequests(pubkey)
+        removeRequests(key)
+        if (device != null && !sameKey(device, key)) removeRequests(device)
         flushOutbox()
     }
 
@@ -241,20 +297,50 @@ class MessengerEngine(
     // ---------- sending ----------
 
     /**
-     * Seal to a contact, to EVERY key I know of them (theirs + their card). With a live token it
-     * goes by token (the road that can go direct); without one, by pubkey (the offline queue).
+     * Where a contact is written to: every device of their ACCOUNT (their card), each with its own
+     * encryption key; or, without a card yet, the key they were added by with every key I know.
+     * An account without a card (Dotrino before it writes) has none.
+     */
+    private suspend fun recipientsOf(pubkey: String): List<Pair<String, List<String>>> {
+        val devices = peers.devicesOf(pubkey)
+        if (devices.isNotEmpty()) return devices.map { it.first to listOf(it.second) }
+        if (isPinned(pubkey)) return emptyList()
+        return listOf(pubkey to peers.encPubsOf(pubkey))
+    }
+
+    /**
+     * Seal to a contact: to EVERY device of their account, each by its most direct road — by token
+     * if it is online this session (the road that can go direct), by pubkey if not (the offline
+     * queue: each device has its own). Before, it went to the one key that accepted, and a message
+     * waiting for a device that stayed off 24 h was lost. It fails only if no device was reached;
+     * the same message twice is dropped by its id on the other side.
      */
     private suspend fun sendToContact(pubkey: String, payload: JsonObject, quiet: Boolean = false) {
-        val keys = peers.encPubsOf(pubkey)
-        val token = synchronized(online) { online[pubkey] }
-        if (token != null) transport.sendSealedTo(token, payload, keys, pubkey)
-        else transport.sendSealed(pubkey, payload, keys, quiet)
+        val to = recipientsOf(pubkey)
+        if (to.isEmpty()) throw EngineError("no device of this account is known yet", "no-devices")
+        sendToDevices(pubkey, payload, to, quiet)
+    }
+
+    private suspend fun sendToDevices(contact: String, payload: JsonObject, to: List<Pair<String, List<String>>>, quiet: Boolean = false) {
+        if (to.isEmpty()) throw EngineError("no device of this account is known", "no-devices")
+        var sent = 0
+        var last: Exception? = null
+        for ((device, keys) in to) {
+            val token = synchronized(online) { deviceTokens[device] ?: (if (to.size == 1) online[contact] else null) }
+            try {
+                if (token != null) transport.sendSealedTo(token, payload, keys, device)
+                else transport.sendSealed(device, payload, keys, quiet)
+                sent++
+            } catch (e: Exception) { last = e }
+        }
+        if (sent == 0) throw last ?: EngineError("nothing could be sent", "send-failed")
     }
 
     suspend fun sendDM(pubkey: String, text: String): Unit = withContext(engine) {
         val t = sanitizeMessage(text)
         if (t.isEmpty()) return@withContext
         if (peers.get(pubkey)?.let { (it["isContact"] as? JsonPrimitive)?.content == "true" } != true) throw EngineError("not a contact", "not-contact")
+        if (recipientsOf(pubkey).isEmpty()) throw EngineError("no device of this account is known yet", "no-devices")
         val entry = buildJsonObject { put("id", UUID.randomUUID().toString()); put("dir", "out"); put("text", t); put("ts", now()); put("pending", true) }
         threads.put(pubkey, entry)
         changed()
@@ -296,6 +382,8 @@ class MessengerEngine(
 
     /** Say hello to a contact: presence (token, nickname, card). Queued quietly if offline. */
     suspend fun sendHelloTo(pubkey: String) {
+        // An account with no known device (Dotrino before it writes) has nobody to greet.
+        if (recipientsOf(pubkey).isEmpty()) return
         runCatching { sendToContact(pubkey, JsonObject(whoAmI() + ("type" to JsonPrimitive("HELLO"))), quiet = true) }
             .onFailure { onWarn("hello", it) }
     }
@@ -304,7 +392,8 @@ class MessengerEngine(
 
     // ---------- receiving ----------
 
-    private data class Who(val pubkey: String, val contact: JsonObject?, val encPub: String)
+    /** [pubkey]: the key they are kept by; [device]: the device that wrote. */
+    private data class Who(val pubkey: String, val contact: JsonObject?, val encPub: String, val device: String)
 
     private fun sameKey(a: String?, b: String?) = a != null && b != null && Delegation.samePubkey(a, b)
 
@@ -329,19 +418,21 @@ class MessengerEngine(
             ?: run { onWarn("message from a token nobody said whose it is — dropped", null); return null }
         val contact = findBySender(claimed)
         if (contact != null && peers.encPubsOf(str(contact, "publickey")!!).any { sameKey(it, m.senderEncPub) }) {
-            return Who(str(contact, "publickey")!!, contact, m.senderEncPub)
+            return Who(str(contact, "publickey")!!, contact, m.senderEncPub, claimed)
         }
         val announced = try { transport.encPubOf(claimed) } catch (e: Exception) { onWarn("could not verify the sender key", e); return null }
         if (!sameKey(announced, m.senderEncPub)) { onWarn("message sealed with a key that is not the sender's — dropped", null); return null }
-        return Who(str(contact, "publickey") ?: claimed, contact, m.senderEncPub)
+        return Who(str(contact, "publickey") ?: claimed, contact, m.senderEncPub, claimed)
     }
 
     private suspend fun handle(m: SealedSession.Message) {
         val type = str(m.payload, "type") ?: return
+        ensurePinned()   // Dotrino has to be a contact BEFORE its first message is judged
         val who = authenticate(m) ?: return
+        m.fromToken?.let { t -> synchronized(online) { deviceTokens[who.device] = t } }
         // BLOCKED (the private flag of the rating card): nothing of theirs gets in — no message,
         // no request — and nothing is answered, not even the ack that would tell them it arrived.
-        if (peers.isBlocked(who.pubkey) || (m.fromPubkey?.let { peers.isBlocked(it) } == true)) return
+        if (isBlocked(who.pubkey) || (m.fromPubkey?.let { isBlocked(it) } == true)) return
         when (type) {
             "CONTACT_REQUEST" -> return onContactRequest(m, who)
             "CONTACT_ACCEPT" -> return onContactAccept(m, who)
@@ -349,7 +440,7 @@ class MessengerEngine(
         // From here on, only contacts. A stranger's message goes nowhere.
         val c = who.contact ?: return
         when (type) {
-            "HELLO" -> onHello(m, c)
+            "HELLO" -> onHello(m, who)
             "DM" -> onDM(m, c)
             "DM_ACK" -> str(m.payload, "id")?.let { id -> threads.threads().forEach { pk -> update(pk, id) { e -> e + ("pending" to JsonPrimitive(false)) } } }
             "RATING_QUERY" -> onRatingQuery(m, c)
@@ -368,36 +459,80 @@ class MessengerEngine(
         }
     }
 
+    /**
+     * The ACCOUNT of who writes: the one of their card if their profile signed it and the device
+     * itself brought it, or the device's key if there is no such card. It is the key they are kept by.
+     */
+    private suspend fun accountOf(who: Who, payload: JsonObject): String =
+        str(who.contact, "publickey") ?: peers.accountFromCard(payload["card"] as? JsonObject, who.device) ?: who.pubkey
+
+    /**
+     * A contact from before, kept by one device's key, moves to its account as soon as that same
+     * device brings the card that proves it (nickname, notes, my rating and the thread go with it).
+     */
+    private suspend fun upgradeToAccount(who: Who, payload: JsonObject): JsonObject? {
+        val c = who.contact ?: return null
+        val old = str(c, "publickey")!!
+        if (!sameKey(old, who.device)) return c
+        val account = peers.accountFromCard(payload["card"] as? JsonObject, who.device) ?: return c
+        if (sameKey(account, old)) return c
+        try {
+            peers.addContact(account, nickname = str(c, "nickname"), encryptionPubkey = str(c, "encryptionPubkey"),
+                lastToken = str(c, "lastToken"), notes = str(c, "contactNotes"))
+            ((c["myRating"] as? JsonObject)?.get("rating") as? JsonPrimitive)?.content?.toDoubleOrNull()?.let { r ->
+                if (peers.get(account)?.get("myRating") == null) peers.setRating(account, r, str(c["myRating"] as? JsonObject, "notes") ?: "")
+            }
+            for (e in threads.list(old)) threads.put(account, e)
+            peers.removeContact(old)
+            synchronized(online) { online.remove(old)?.let { online[account] = it } }
+            if (active == old) active = account
+            onWarn("contact moved from a device key to its account", null)
+        } catch (e: Exception) { onWarn("could not move the contact to its account", e); return c }
+        return peers.get(account) ?: c
+    }
+
     private suspend fun onContactRequest(m: SealedSession.Message, who: Who) {
         val nick = sanitizeNickname(str(m.payload, "nickname"))
         noteProfile(who.pubkey, m.payload)
+        val contact = upgradeToAccount(who, m.payload)
+        val account = str(contact, "publickey") ?: accountOf(who, m.payload)
+        if (isBlocked(account)) return
         // Someone redeemed my code, and a code is SINGLE USE: ask for another one now.
         refreshPairingCode()
-        m.fromToken?.let { markOnline(who.pubkey, it) }
-        if (who.contact != null || loadRequests().any { it.pubkey == who.pubkey && it.dir == "out" }) {
-            becomeContacts(who.pubkey, nick, m.fromToken, who.encPub)
-            replyAccept(who.pubkey)
+        m.fromToken?.let { markOnline(account, it) }
+        // Already a contact by their account (Dotrino always is, or I added them from another of
+        // their devices), or I asked them too: accept straight away.
+        val known = contact ?: peers.contacts().firstOrNull { sameKey(str(it, "publickey"), account) }
+        if (known != null || requestOf(who.device, "out") != null || requestOf(account, "out") != null) {
+            becomeContacts(account, nick, m.fromToken, who.encPub, who.device)
+            replyAccept(account)
             changed(); return
         }
-        val vouched = isVouched(who.pubkey)
-        upsertRequest(Request(who.pubkey, "in", nick, m.fromToken, who.encPub, now(), vouched))
+        val vouched = isVouched(account)
+        upsertRequest(Request(account, "in", nick, m.fromToken, who.encPub, now(), vouched))
         changed()
-        onNotice(Notice("request", "request-${who.pubkey}", who.pubkey, nick.ifEmpty { who.pubkey.take(8) }, "", vouched))
+        onNotice(Notice("request", "request-$account", account, nick.ifEmpty { account.take(8) }, "", vouched))
     }
 
     private suspend fun onContactAccept(m: SealedSession.Message, who: Who) {
-        // Only counts if I asked. Nobody adds themselves to my contacts.
-        val mine = loadRequests().firstOrNull { it.pubkey == who.pubkey && it.dir == "out" }
-        if (mine == null && who.contact == null) return
+        // Only counts if I asked — that device, or its whole account (with its card, from a link) —
+        // or if they are already a contact by their account (Dotrino always is). Nobody adds
+        // themselves to my contacts.
         noteProfile(who.pubkey, m.payload)
-        becomeContacts(who.pubkey, mine?.nickname?.takeIf { it.isNotEmpty() } ?: sanitizeNickname(str(m.payload, "nickname")), m.fromToken, who.encPub)
-        m.fromToken?.let { markOnline(who.pubkey, it) }
+        val contact = upgradeToAccount(who, m.payload)
+        val account = str(contact, "publickey") ?: accountOf(who, m.payload)
+        val mine = requestOf(who.device, "out") ?: requestOf(account, "out")
+        val known = contact ?: peers.contacts().firstOrNull { sameKey(str(it, "publickey"), account) }
+        if (mine == null && known == null) return
+        becomeContacts(account, mine?.nickname?.takeIf { it.isNotEmpty() } ?: sanitizeNickname(str(m.payload, "nickname")), m.fromToken, who.encPub, who.device)
+        m.fromToken?.let { markOnline(account, it) }
         changed()
     }
 
-    private suspend fun onHello(m: SealedSession.Message, c: JsonObject) {
+    private suspend fun onHello(m: SealedSession.Message, who: Who) {
+        noteProfile(who.pubkey, m.payload)
+        val c = upgradeToAccount(who, m.payload) ?: return
         val pk = str(c, "publickey")!!
-        noteProfile(pk, m.payload)
         val patch = mutableMapOf<String, String?>()
         m.fromToken?.let { patch["lastToken"] = it }
         if (str(c, "nickname").isNullOrEmpty()) sanitizeNickname(str(m.payload, "nickname")).takeIf { it.isNotEmpty() }?.let { patch["nickname"] = it }

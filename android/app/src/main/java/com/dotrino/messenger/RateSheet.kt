@@ -44,9 +44,11 @@ class RateSheet(private val a: MainActivity, private val e: MessengerEngine, pri
             val hint = a.label("", 13f, a.col(R.color.m_muted))
             body.add(hint, top = 20)
             var blocked = runCatching { e.isBlocked(pk) }.getOrDefault(false)
+            // Dotrino, the fixed contact, cannot be blocked: the button is there, off, with the reason.
+            val pinned = e.isPinned(pk)
             lateinit var toggle: TextView
             fun paintBlock() {
-                hint.text = t(if (blocked) "native.blockedHint" else "native.blockHint")
+                hint.text = t(if (pinned) "native.pinnedNoBlock" else if (blocked) "native.blockedHint" else "native.blockHint")
                 toggle.text = t(if (blocked) "native.unblock" else "native.block")
                 toggle.setTextColor(a.col(if (blocked) R.color.m_text else R.color.m_danger))
             }
@@ -63,6 +65,7 @@ class RateSheet(private val a: MainActivity, private val e: MessengerEngine, pri
                 }
             }
             body.add(toggle, top = 4)
+            if (pinned) { toggle.isEnabled = false; toggle.alpha = 0.4f }
             paintBlock()
             paint()
             dialog.show()

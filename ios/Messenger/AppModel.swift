@@ -177,6 +177,9 @@ final class AppModel: ObservableObject {
 
     func send(_ text: String) async throws { guard let pk = open else { return }; try await engine?.sendDM(pk, text) }
     func addByCode(_ code: String, alias: String) async throws { try await engine?.addByCode(code, alias: alias) }
+    func addByLink(_ p: LinkPeer, alias: String) async throws { try await engine?.addByLink(pubkey: p.pubkey, alias: alias, card: p.card) }
+    func canWrite(_ pk: String) async -> Bool { await engine?.canWrite(pk) ?? false }
+    func isPinned(_ pk: String) -> Bool { engine?.isPinned(pk) ?? false }
     func accept(_ pk: String) async { await engine?.acceptRequest(pk) }
     func dismiss(_ pk: String, _ dir: String) async { await engine?.dismissRequest(pk, dir: dir) }
     func rate(_ pk: String, _ v: [String: Int]) async throws { try await engine?.rate(pk, v) }

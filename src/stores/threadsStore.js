@@ -372,7 +372,10 @@ export const useThreadsStore = defineStore('threads', () => {
    * that identity announced signed. Returns `{ pubkey, contact }` or null.
    */
   const authenticate = async (fromToken, meta) => {
-    const claimed = meta.fromPubkey || connection.pubkeyOfToken(fromToken)
+    // Por token desde un token que nadie saludó (las nativas no saludan antes de mandar), la
+    // llave no viene: se le pregunta al proxio de quién es, como hacen ellas. Antes se tiraba.
+    let claimed = meta.fromPubkey || connection.pubkeyOfToken(fromToken)
+    if (!claimed && fromToken) claimed = await connection.whoIs(fromToken).catch((e) => { console.warn('[messenger] whoIs failed:', e?.code || '', e?.message); return null })
     const senderEncPub = meta.senderEncPub
     if (!claimed || !senderEncPub) return null
     const contact = contacts.findBySender(claimed)

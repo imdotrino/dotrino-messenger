@@ -18,12 +18,14 @@ import com.dotrino.sdk.ui.DotrinoQr
  * pasted or scanned) and an optional alias → a contact REQUEST. MY CODE: mine, and its QR (a
  * link, so a phone's camera opens the messenger with the code in place).
  */
-class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code: String?, private val scan: () -> Unit, startTab: String = "add") {
+class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code: String?, private val scan: () -> Unit, startTab: String = "add",
+               /** From a `#to=` link (the feedback email): whom to ask, with no code. */
+               private val peer: MainActivity.LinkPeer? = null) {
     val dialog: Dialog
     private val body: LinearLayout
     private var tab = startTab
     private val input = a.field(t("add.phToken")).apply { tag = "code-input"; setText(code ?: ""); typeface = android.graphics.Typeface.MONOSPACE; gravity = Gravity.CENTER }
-    private val alias = a.field(t("add.phAlias")).apply { tag = "alias-input" }
+    private val alias = a.field(t("add.phAlias")).apply { tag = "alias-input"; peer?.nickname?.let { setText(it) } }
     private val error = a.label("", 14f, a.col(R.color.m_danger)).apply { visibility = View.GONE; tag = "add-error" }
     private var sending = false
 
@@ -54,7 +56,7 @@ class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code
                 setOnClickListener { tab = id; render() }
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         })
-        if (tab == "add") addTab() else mineTab()
+        if (tab == "add" && peer != null) toTab() else if (tab == "add") addTab() else mineTab()
     }
 
     private fun detach(v: View) { (v.parent as? ViewGroup)?.removeView(v) }
@@ -77,6 +79,34 @@ class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code
         detach(error); body.add(error, top = 10)
         body.add(a.label(t("add.hint"), 13f, a.col(R.color.m_muted)), top = 10)
         body.add(a.pill(if (sending) t("add.sending") else t("add.send"), filled = true) { submit() }.apply { tag = "send-hello"; isEnabled = !sending; alpha = if (sending) 0.5f else 1f }, top = 16)
+    }
+
+    /** A request to the key of a link: who it goes to, the alias, and «send». */
+    private fun toTab() {
+        val nick = peer!!.nickname.ifEmpty { t("add.toNoNick") }
+        body.add(a.label(t("add.toInfo").replace("{nick}", nick), 14f, a.col(R.color.m_muted)).apply { tag = "to-info" }, top = 16)
+        body.add(a.label(t("add.fieldAlias"), 13f, a.col(R.color.m_muted), bold = true), top = 14)
+        detach(alias); body.add(alias, top = 6)
+        detach(error); body.add(error, top = 10)
+        body.add(a.label(t("add.hint"), 13f, a.col(R.color.m_muted)), top = 10)
+        body.add(a.pill(if (sending) t("add.sending") else t("add.send"), filled = true) { submitToPeer() }.apply { tag = "send-hello"; isEnabled = !sending; alpha = if (sending) 0.5f else 1f }, top = 16)
+    }
+
+    private fun submitToPeer() {
+        val p = peer ?: return
+        if (sending) return
+        error.visibility = View.GONE
+        sending = true; render()
+        a.launch {
+            try {
+                e.addByLink(p.pubkey, alias.text.toString(), p.card)
+                dialog.dismiss()
+            } catch (x: MessengerEngine.EngineError) {
+                showError(if (x.code == "offline") "errOffline" else "errSend")
+            } catch (x: Exception) { android.util.Log.w("messenger", "request by link", x); showError("errSend") }
+            sending = false
+            if (dialog.isShowing) render()
+        }
     }
 
     private fun mineTab() {

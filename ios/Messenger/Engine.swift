@@ -86,6 +86,11 @@ final class DefaultsKv: Kv {
 actor MessengerEngine {
     static let protocolVersion = 2
     static let requestTTL: Int64 = 24 * 60 * 60 * 1000
+    /// THE DOTRINO ACCOUNT: a fixed contact of every messenger, like the PWA's (`DOTRINO_ACCOUNT` in
+    /// `src/stores/contactsStore.js`) and `MessengerEngine.kt`. Dotrino answers there what is asked by
+    /// email, so it cannot be removed or blocked: if it is missing, it comes back. It is the key of
+    /// the PROFILE: any of its devices writes, recognised by a card signed by this key.
+    static let dotrinoAccount = #"{"key_ops":["verify"],"ext":true,"kty":"EC","x":"McyhKieRw_Jcl3TY9EvLovL-ALzGoWqMOrfnFjT7XpA","y":"V7tfpDWN37tPnhXnIFUlMaTepcTzzxPWTj_72PkpKPw","crv":"P-256"}"#
 
     struct Request: Equatable, Sendable {
         let pubkey: String, dir: String, nickname: String, token: String?, encryptionPubkey: String?, ts: Int64
@@ -109,6 +114,9 @@ actor MessengerEngine {
     private let reputation: Reputation?
     nonisolated let mine: Compat.Declaration
     private var online: [String: String] = [:]
+    private var deviceTokens: [String: String] = [:]   // DEVICE pubkey -> live token: one per device of an account
+    /// The fixed contact: `dotrinoAccount` (another key only in tests).
+    nonisolated let pinnedAccount: String
     private var greeted = Set<String>()
     private var outbox: [JSON] = []
     private var offs: [() -> Void] = []
@@ -121,8 +129,9 @@ actor MessengerEngine {
     private var onChange: @Sendable () -> Void = {}
     private var onNotice: @Sendable (Notice) -> Void = { _ in }
 
-    init(transport: Transport, profile: Profile, peers: PeerBook, threads: Threads, kv: Kv, version: String, reputation: Reputation? = nil) {
+    init(transport: Transport, profile: Profile, peers: PeerBook, threads: Threads, kv: Kv, version: String, reputation: Reputation? = nil, pinnedAccount: String = MessengerEngine.dotrinoAccount) {
         self.transport = transport; self.profile = profile; self.peers = peers; self.threads = threads; self.kv = kv; self.reputation = reputation
+        self.pinnedAccount = pinnedAccount
         mine = Compat.declare(product: "messenger", version: version, protocolVersion: Self.protocolVersion)
     }
 
@@ -161,10 +170,28 @@ actor MessengerEngine {
 
     // MARK: what the screen reads
 
-    func contacts() -> [JSON] { (try? peers.contacts()) ?? [] }
-    /// Block or unblock someone: private, in the address book (travels to the vault), never published.
-    func setBlocked(_ pk: String, _ blocked: Bool) throws { try peers.setBlocked(pk, blocked); onChange() }
-    func isBlocked(_ pk: String) -> Bool { (try? peers.isBlocked(pk)) ?? false }
+    func contacts() -> [JSON] { ensurePinned(); return (try? peers.contacts()) ?? [] }
+
+    /// Is it the Dotrino account (the fixed contact)?
+    nonisolated func isPinned(_ pk: String?) -> Bool { Delegation.samePubkey(pk, pinnedAccount) }
+
+    /// Dotrino is always among the contacts. If it was removed (here, or in another app that shares
+    /// the book), it comes back — kept under the key its card brings, if it already arrived, so that
+    /// contact and card are the same record.
+    private func ensurePinned() {
+        guard let cs = try? peers.contacts(), !cs.contains(where: { isPinned($0["publickey"]?.string) }) else { return }
+        let key = ((try? peers.all()) ?? [:]).values.compactMap { $0["card"] }.first { isPinned($0["profileId"]?.string) }?["profileId"]?.string ?? pinnedAccount
+        _ = try? peers.addContact(key, nickname: "Dotrino")
+    }
+
+    /// Block or unblock someone: private, in the address book (travels to the vault), never published. Not Dotrino.
+    func setBlocked(_ pk: String, _ blocked: Bool) throws {
+        if isPinned(pk) { throw EngineError(description: "the Dotrino account cannot be blocked", code: "pinned-contact") }
+        try peers.setBlocked(pk, blocked); onChange()
+    }
+    func isBlocked(_ pk: String) -> Bool { !isPinned(pk) && ((try? peers.isBlocked(pk)) ?? false) }
+    /// Whether there is any device to write to (Dotrino has none until it writes first).
+    func canWrite(_ pk: String) -> Bool { !recipientsOf(pk).isEmpty }
     func isOnline(_ pk: String) -> Bool { online[pk] != nil }
     func thread(_ pk: String) -> [JSON] { threads.list(pk).sorted { ($0["ts"]?.int ?? 0) < ($1["ts"]?.int ?? 0) } }
     func unread(_ pk: String) -> Int { threads.list(pk).filter { $0["dir"]?.string == "in" && $0["_read"]?.bool != true }.count }
@@ -211,9 +238,26 @@ actor MessengerEngine {
         return .object(o)
     }
 
-    private func sendContactRequest(token: String?, pubkey: String, alias: String) async throws {
-        if loadRequests().contains(where: { $0.pubkey == pubkey && $0.dir == "in" }) { await acceptRequest(pubkey); return }
+    /// A contact request to the key of a LINK (`#to=<key>&nick=…&card=…`, the one the feedback email
+    /// carries so Dotrino can answer): no code to redeem. With their card it goes to every device of
+    /// the account, sealed with the keys the card lists — they need not have published theirs.
+    func addByLink(pubkey: String, alias: String, card: JSON?) async throws {
+        if !transport.isOnline { throw EngineError(description: "not connected", code: "offline") }
+        try await sendContactRequest(token: nil, pubkey: pubkey, alias: alias, card: card)
+    }
+
+    private func sendContactRequest(token: String?, pubkey: String, alias: String, card: JSON? = nil) async throws {
+        if requestOf(pubkey, "in") != nil { await acceptRequest(pubkey); return }
         let payload = whoAmI("CONTACT_REQUEST")
+        if let card {
+            if (try? peers.adoptPeerCard(card)) == nil { print("messenger: the card in the link could not be adopted") }
+            if let account = try? peers.accountFromCard(card, device: pubkey) {
+                try await sendToDevices(account, payload, ((try? peers.devicesOf(account)) ?? []).map { ($0.pub, [$0.encPub]) })
+                upsertRequest(Request(pubkey: account, dir: "out", nickname: Self.sanitizeNickname(alias), token: nil, encryptionPubkey: nil, ts: nowMs()))
+                onChange(); return
+            }
+            print("messenger: the card in the link does not prove that key: sending to the key alone")
+        }
         if let token { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: [], peerPubkey: pubkey) }
         else { try await transport.sendSealed(toPubkey: pubkey, payload, recipientEncPubs: [], quiet: false) }
         upsertRequest(Request(pubkey: pubkey, dir: "out", nickname: Self.sanitizeNickname(alias), token: token, encryptionPubkey: nil, ts: nowMs()))
@@ -243,19 +287,24 @@ actor MessengerEngine {
 
     private func upsertRequest(_ r: Request) {
         var l = loadRequests()
-        if let i = l.firstIndex(where: { $0.pubkey == r.pubkey && $0.dir == r.dir }) {
+        if let i = l.firstIndex(where: { same($0.pubkey, r.pubkey) && $0.dir == r.dir }) {
             var n = r; n = Request(pubkey: r.pubkey, dir: r.dir, nickname: r.nickname, token: r.token, encryptionPubkey: r.encryptionPubkey, ts: l[i].ts, vouched: r.vouched); l[i] = n
         } else { l.insert(r, at: 0) }
         saveRequests(l)
     }
 
     private func removeRequests(_ pubkey: String, dir: String? = nil) {
-        saveRequests(loadRequests().filter { !($0.pubkey == pubkey && (dir == nil || $0.dir == dir)) })
+        saveRequests(loadRequests().filter { !(same($0.pubkey, pubkey) && (dir == nil || $0.dir == dir)) })
+    }
+
+    private func requestOf(_ pubkey: String?, _ dir: String) -> Request? {
+        guard let pubkey else { return nil }
+        return loadRequests().first { same($0.pubkey, pubkey) && $0.dir == dir }
     }
 
     /// Accept a request: now we are contacts on both sides. No message enters any chat.
     func acceptRequest(_ pubkey: String) async {
-        guard let r = loadRequests().first(where: { $0.pubkey == pubkey && $0.dir == "in" }) else { return }
+        guard let r = requestOf(pubkey, "in") else { return }
         await becomeContacts(pubkey, nickname: r.nickname, token: r.token, encPub: r.encryptionPubkey)
         if let t = r.token { online[pubkey] = t }
         await replyAccept(pubkey)
@@ -265,11 +314,16 @@ actor MessengerEngine {
     /// Dismiss an incoming request, or cancel one I sent. The other side is not told.
     func dismissRequest(_ pubkey: String, dir: String) { removeRequests(pubkey, dir: dir); onChange() }
 
-    private func becomeContacts(_ pubkey: String, nickname: String, token: String?, encPub: String?) async {
-        let existing = try? peers.get(pubkey)
+    /// `pubkey`: the key the contact is kept by (their account when their card proves it); `device`: the one that wrote.
+    private func becomeContacts(_ pubkey: String, nickname: String, token: String?, encPub: String?, device: String? = nil) async {
+        // The same key may come written another way: it stays in the record already there.
+        var existing: JSON? = ((try? peers.contacts()) ?? []).first { same($0["publickey"]?.string, pubkey) }
+        if existing == nil { existing = try? peers.get(pubkey) }
+        let key = existing?["publickey"]?.string ?? pubkey
         let nick = existing?["nickname"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? (nickname.isEmpty ? String(pubkey.prefix(8)) : nickname)
-        _ = try? peers.addContact(pubkey, nickname: nick, encryptionPubkey: encPub ?? existing?["encryptionPubkey"]?.string, lastToken: token)
-        removeRequests(pubkey)
+        _ = try? peers.addContact(key, nickname: nick, encryptionPubkey: encPub ?? existing?["encryptionPubkey"]?.string, lastToken: token)
+        removeRequests(key)
+        if let device, !same(device, key) { removeRequests(device) }
         await flushOutbox()
     }
 
@@ -277,17 +331,44 @@ actor MessengerEngine {
 
     // MARK: sending
 
-    /// Sealed to EVERY key I know of the contact; by token if online, by pubkey if not.
+    /// Where a contact is written to: every device of their ACCOUNT (their card), each with its own
+    /// encryption key; or, without a card yet, the key they were added by with every key I know.
+    /// An account without a card (Dotrino before it writes) has none.
+    private func recipientsOf(_ pk: String) -> [(String, [String])] {
+        let devices = (try? peers.devicesOf(pk)) ?? []
+        if !devices.isEmpty { return devices.map { ($0.pub, [$0.encPub]) } }
+        if isPinned(pk) { return [] }
+        return [(pk, (try? peers.encPubsOf(pk)) ?? [])]
+    }
+
+    /// Sealed to EVERY device of the contact's account, each by its most direct road — by token if
+    /// online this session, by pubkey if not (each device has its own offline queue). Before, it went
+    /// to the one key that accepted, and a message for a device that stayed off 24 h was lost. It
+    /// fails only if no device was reached; the same message twice is dropped by its id.
     private func sendToContact(_ pubkey: String, _ payload: JSON, quiet: Bool = false) async throws {
-        let keys = (try? peers.encPubsOf(pubkey)) ?? []
-        if let token = online[pubkey] { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: keys, peerPubkey: pubkey) }
-        else { try await transport.sendSealed(toPubkey: pubkey, payload, recipientEncPubs: keys, quiet: quiet) }
+        try await sendToDevices(pubkey, payload, recipientsOf(pubkey), quiet: quiet)
+    }
+
+    private func sendToDevices(_ contact: String, _ payload: JSON, _ to: [(String, [String])], quiet: Bool = false) async throws {
+        if to.isEmpty { throw EngineError(description: "no device of this account is known yet", code: "no-devices") }
+        var sent = 0
+        var last: Error?
+        for (device, keys) in to {
+            let token = deviceTokens[device] ?? (to.count == 1 ? online[contact] : nil)
+            do {
+                if let token { try await transport.sendSealed(toToken: token, payload, recipientEncPubs: keys, peerPubkey: device) }
+                else { try await transport.sendSealed(toPubkey: device, payload, recipientEncPubs: keys, quiet: quiet) }
+                sent += 1
+            } catch { last = error }
+        }
+        if sent == 0 { throw last ?? EngineError(description: "nothing could be sent", code: "send-failed") }
     }
 
     func sendDM(_ pubkey: String, _ text: String) async throws {
         let t = Self.sanitizeMessage(text)
         if t.isEmpty { return }
         guard (try? peers.get(pubkey))?["isContact"]?.bool == true else { throw EngineError(description: "not a contact", code: "not-contact") }
+        if recipientsOf(pubkey).isEmpty { throw EngineError(description: "no device of this account is known yet", code: "no-devices") }
         let id = UUID().uuidString.lowercased(), ts = nowMs()
         threads.put(pubkey, ["id": .string(id), "dir": "out", "text": .string(t), "ts": .int(ts), "pending": true])
         onChange()
@@ -325,7 +406,11 @@ actor MessengerEngine {
     }
 
     /// Presence: token, nickname and card. Queued quietly if they are offline.
-    func sendHello(to pk: String) async { try? await sendToContact(pk, whoAmI("HELLO"), quiet: true) }
+    func sendHello(to pk: String) async {
+        // An account with no known device (Dotrino before it writes) has nobody to greet.
+        if recipientsOf(pk).isEmpty { return }
+        try? await sendToContact(pk, whoAmI("HELLO"), quiet: true)
+    }
 
     // MARK: receiving
 
@@ -337,7 +422,8 @@ actor MessengerEngine {
         return cs.first { c in ((try? peers.cardOf(c["publickey"]?.string ?? ""))??["keys"]?.array ?? []).contains { same($0["pub"]?.string, pk) } }
     }
 
-    private struct Who { let pubkey: String; let contact: JSON?; let encPub: String }
+    /// `pubkey`: the key they are kept by; `device`: the device that wrote.
+    private struct Who { let pubkey: String; let contact: JSON?; let encPub: String; let device: String }
 
     private func authenticate(_ m: SealedSession.Message) async -> Who? {
         // By token after a restart the sender's pubkey may be unknown (that new token has not
@@ -351,17 +437,20 @@ actor MessengerEngine {
         guard let claimed else { print("messenger: message from a token nobody said whose it is — dropped"); return nil }
         let contact = findBySender(claimed)
         if let c = contact, let pk = c["publickey"]?.string, ((try? peers.encPubsOf(pk)) ?? []).contains(where: { same($0, m.senderEncPub) }) {
-            return Who(pubkey: pk, contact: c, encPub: m.senderEncPub)
+            return Who(pubkey: pk, contact: c, encPub: m.senderEncPub, device: claimed)
         }
         guard let announced = try? await transport.encPubOf(claimed), same(announced, m.senderEncPub) else { return nil }
-        return Who(pubkey: contact?["publickey"]?.string ?? claimed, contact: contact, encPub: m.senderEncPub)
+        return Who(pubkey: contact?["publickey"]?.string ?? claimed, contact: contact, encPub: m.senderEncPub, device: claimed)
     }
 
     private func handle(_ m: SealedSession.Message) async {
-        guard let type = m.payload["type"]?.string, let who = await authenticate(m) else { return }
+        guard let type = m.payload["type"]?.string else { return }
+        ensurePinned()   // Dotrino has to be a contact BEFORE its first message is judged
+        guard let who = await authenticate(m) else { return }
+        if let t = m.fromToken { deviceTokens[who.device] = t }
         // BLOCKED (the private flag of the rating card): nothing of theirs gets in — no message,
         // no request — and nothing is answered, not even the ack that would tell them it arrived.
-        if (try? peers.isBlocked(who.pubkey)) == true || (m.fromPubkey.map { (try? peers.isBlocked($0)) == true } ?? false) { return }
+        if isBlocked(who.pubkey) || (m.fromPubkey.map { isBlocked($0) } ?? false) { return }
         switch type {
         case "CONTACT_REQUEST": await onContactRequest(m, who); return
         case "CONTACT_ACCEPT": await onContactAccept(m, who); return
@@ -369,7 +458,7 @@ actor MessengerEngine {
         }
         guard let c = who.contact else { return }   // a stranger's message goes nowhere
         switch type {
-        case "HELLO": await onHello(m, c)
+        case "HELLO": await onHello(m, who)
         case "DM": await onDM(m, c)
         case "DM_ACK": if let id = m.payload["id"]?.string { for pk in threads.threads() { update(pk, id) { $0["pending"] = false } } }
         case "RATING_QUERY": await onRatingQuery(m, c)
@@ -384,35 +473,73 @@ actor MessengerEngine {
         if let card = payload["card"], card.object != nil { _ = try? peers.adoptPeerCard(card) }
     }
 
+    /// The ACCOUNT of who writes: the one of their card if their profile signed it and the device
+    /// itself brought it, or the device's key if there is no such card. It is the key they are kept by.
+    private func accountOf(_ who: Who, _ payload: JSON) -> String {
+        who.contact?["publickey"]?.string ?? (try? peers.accountFromCard(payload["card"], device: who.device)) ?? who.pubkey
+    }
+
+    /// A contact from before, kept by one device's key, moves to its account as soon as that same
+    /// device brings the card that proves it (nickname, notes, my rating and the thread go with it).
+    private func upgradeToAccount(_ who: Who, _ payload: JSON) -> JSON? {
+        guard let c = who.contact, let old = c["publickey"]?.string else { return who.contact }
+        guard same(old, who.device), let account = try? peers.accountFromCard(payload["card"], device: who.device), !same(account, old) else { return c }
+        do {
+            _ = try peers.addContact(account, nickname: c["nickname"]?.string, encryptionPubkey: c["encryptionPubkey"]?.string,
+                                     lastToken: c["lastToken"]?.string, notes: c["contactNotes"]?.string)
+            let rating: Double? = { switch c["myRating"]?["rating"] { case .int(let n)?: return Double(n); case .double(let d)?: return d; default: return nil } }()
+            if let r = rating, (try? peers.get(account))?["myRating"] == nil {
+                _ = try peers.setRating(account, r, notes: c["myRating"]?["notes"]?.string ?? "")
+            }
+            for e in threads.list(old) { threads.put(account, e) }
+            _ = try peers.removeContact(old)
+            if let t = online.removeValue(forKey: old) { online[account] = t }
+            if active == old { active = account }
+            print("messenger: contact moved from a device key to its account")
+        } catch { print("messenger: could not move the contact to its account: \(error)"); return c }
+        return (try? peers.get(account)) ?? c
+    }
+
     private func onContactRequest(_ m: SealedSession.Message, _ who: Who) async {
         let nick = Self.sanitizeNickname(m.payload["nickname"]?.string)
         noteProfile(who.pubkey, m.payload)
+        let contact = upgradeToAccount(who, m.payload)
+        let account = contact?["publickey"]?.string ?? accountOf(who, m.payload)
+        if isBlocked(account) { return }
         await refreshPairingCode()   // a code is SINGLE USE: the one on screen is burnt
-        if let t = m.fromToken { online[who.pubkey] = t }
-        if who.contact != nil || loadRequests().contains(where: { $0.pubkey == who.pubkey && $0.dir == "out" }) {
-            await becomeContacts(who.pubkey, nickname: nick, token: m.fromToken, encPub: who.encPub)
-            await replyAccept(who.pubkey)
+        if let t = m.fromToken { online[account] = t }
+        // Already a contact by their account (Dotrino always is, or added from another of their
+        // devices), or I asked them too: accept straight away.
+        let known = contact ?? ((try? peers.contacts()) ?? []).first { same($0["publickey"]?.string, account) }
+        if known != nil || requestOf(who.device, "out") != nil || requestOf(account, "out") != nil {
+            await becomeContacts(account, nickname: nick, token: m.fromToken, encPub: who.encPub, device: who.device)
+            await replyAccept(account)
             onChange(); return
         }
-        let vouched = await isVouched(who.pubkey)
-        upsertRequest(Request(pubkey: who.pubkey, dir: "in", nickname: nick, token: m.fromToken, encryptionPubkey: who.encPub, ts: nowMs(), vouched: vouched))
+        let vouched = await isVouched(account)
+        upsertRequest(Request(pubkey: account, dir: "in", nickname: nick, token: m.fromToken, encryptionPubkey: who.encPub, ts: nowMs(), vouched: vouched))
         onChange()
-        onNotice(Notice(kind: "request", id: "request-\(who.pubkey)", fromPubkey: who.pubkey, fromNickname: nick.isEmpty ? String(who.pubkey.prefix(8)) : nick, text: "", vouched: vouched))
+        onNotice(Notice(kind: "request", id: "request-\(account)", fromPubkey: account, fromNickname: nick.isEmpty ? String(account.prefix(8)) : nick, text: "", vouched: vouched))
     }
 
     private func onContactAccept(_ m: SealedSession.Message, _ who: Who) async {
-        let asked = loadRequests().first { $0.pubkey == who.pubkey && $0.dir == "out" }
-        if asked == nil && who.contact == nil { return }   // nobody adds themselves
+        // Only counts if I asked — that device, or its whole account (with its card, from a link) —
+        // or if they are already a contact by their account (Dotrino always is).
         noteProfile(who.pubkey, m.payload)
+        let contact = upgradeToAccount(who, m.payload)
+        let account = contact?["publickey"]?.string ?? accountOf(who, m.payload)
+        let asked = requestOf(who.device, "out") ?? requestOf(account, "out")
+        let known = contact ?? ((try? peers.contacts()) ?? []).first { same($0["publickey"]?.string, account) }
+        if asked == nil && known == nil { return }   // nobody adds themselves
         let nick = (asked?.nickname).flatMap { $0.isEmpty ? nil : $0 } ?? Self.sanitizeNickname(m.payload["nickname"]?.string)
-        await becomeContacts(who.pubkey, nickname: nick, token: m.fromToken, encPub: who.encPub)
-        if let t = m.fromToken { online[who.pubkey] = t }
+        await becomeContacts(account, nickname: nick, token: m.fromToken, encPub: who.encPub, device: who.device)
+        if let t = m.fromToken { online[account] = t }
         onChange()
     }
 
-    private func onHello(_ m: SealedSession.Message, _ c: JSON) async {
-        guard let pk = c["publickey"]?.string else { return }
-        noteProfile(pk, m.payload)
+    private func onHello(_ m: SealedSession.Message, _ who: Who) async {
+        noteProfile(who.pubkey, m.payload)
+        guard let c = upgradeToAccount(who, m.payload), let pk = c["publickey"]?.string else { return }
         var patch: [String: String?] = [:]
         if let t = m.fromToken { patch["lastToken"] = t }
         if (c["nickname"]?.string ?? "").isEmpty { let n = Self.sanitizeNickname(m.payload["nickname"]?.string); if !n.isEmpty { patch["nickname"] = n } }

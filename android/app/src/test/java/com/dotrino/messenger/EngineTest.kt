@@ -19,7 +19,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import com.dotrino.sdk.Canonical
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -57,9 +61,10 @@ class EngineTest {
         val codes = HashMap<String, String>()
         var codeTtl = 60_000L
         var codeCalls = 0
-        inner class Phone(val name: String) : Transport {
-            val keys = SoftKeys()
-            val profile = Profile.of(keys)
+        inner class Phone(val name: String, val keys: SoftKeys = SoftKeys(), acta: JsonObject? = null) : Transport {
+            val profile = Profile.of(keys, acta)
+            /** Every payload type that reached this device, whoever it was for. */
+            val got = CopyOnWriteArrayList<String>()
             val token = "T-$name"
             val sealing = IdentitySealing(profile, "messenger")
             val listeners = CopyOnWriteArrayList<(SealedSession.Message) -> Unit>()
@@ -67,6 +72,7 @@ class EngineTest {
             private suspend fun deliverTo(to: Phone, payload: JsonObject, keys: List<String>) {
                 val env = sealing.seal(payload, keys.ifEmpty { listOf(to.profile.encPub) })
                 val opened = runCatching { to.sealing.open(env) }.getOrNull() ?: return
+                to.got.add((opened.payload["type"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "?")
                 val m = SealedSession.Message(token, profile.publickey, opened.payload, opened.senderEncPub, false, null)
                 to.listeners.forEach { it(m) }
             }
@@ -101,12 +107,14 @@ class EngineTest {
         }
     }
 
-    private class Person(net: Net, name: String) {
-        val phone = net.Phone(name)
+    private class Person(net: Net, name: String, keys: SoftKeys = SoftKeys(), acta: JsonObject? = null, pinned: String = MessengerEngine.DOTRINO_ACCOUNT) {
+        val phone = net.Phone(name, keys, acta)
         val kv: Kv = MemoryKv()
         val threads = MemoryThreads()
         val peers = PeerBook(PeerBook.MemoryStorage(), phone.profile)
-        val engine = MessengerEngine(phone, phone.profile, peers, threads, kv, "0.3.0").also { it.nickname = name; it.start() }
+        val engine = MessengerEngine(phone, phone.profile, peers, threads, kv, "0.3.0", pinnedAccount = pinned).also { it.nickname = name; it.start() }
+        /** The contacts, without the fixed one (Dotrino). */
+        suspend fun people() = engine.contacts().filterNot { engine.isPinned(it["publickey"]!!.jsonPrimitive.content) }
         val notices = CopyOnWriteArrayList<MessengerEngine.Notice>()
         init { engine.onNotice = { notices.add(it) } }
         val pubkey get() = phone.profile.publickey
@@ -123,12 +131,12 @@ class EngineTest {
         assertEquals("request", ana.notices.single().kind)
         // Nothing in any chat, and nobody is a contact yet.
         assertTrue(ana.threads.threads().isEmpty()); assertTrue(beto.threads.threads().isEmpty())
-        assertTrue(ana.engine.contacts().isEmpty()); assertTrue(beto.engine.contacts().isEmpty())
+        assertTrue(ana.people().isEmpty()); assertTrue(beto.people().isEmpty())
         assertEquals("out", beto.engine.requests().single().dir)
 
         ana.engine.acceptRequest(beto.pubkey)
-        until("beto sees ana as a contact") { beto.engine.contacts().any { it["publickey"]!!.jsonPrimitive.content == ana.pubkey } }
-        assertEquals("Anita", beto.engine.contacts().single()["nickname"]!!.jsonPrimitive.content) // the alias Beto chose
+        until("beto sees ana as a contact") { beto.people().any { it["publickey"]!!.jsonPrimitive.content == ana.pubkey } }
+        assertEquals("Anita", beto.people().single()["nickname"]!!.jsonPrimitive.content) // the alias Beto chose
         assertTrue(ana.engine.requests().isEmpty()); assertTrue(beto.engine.requests().isEmpty())
 
         beto.engine.sendDM(ana.pubkey, "hola ana & ñ <b>")
@@ -145,7 +153,7 @@ class EngineTest {
         beto.engine.addByCode(ana.engine.pairingCode!!, "Anita")
         until("ana gets the request") { ana.engine.requests().any { it.dir == "in" } }
         ana.engine.acceptRequest(beto.pubkey)
-        until("beto sees ana") { beto.engine.contacts().isNotEmpty() }
+        until("beto sees ana") { beto.people().isNotEmpty() }
         beto.phone.unannounced(ana.phone, buildJsonObject { put("type", "DM"); put("text", "tras reiniciar"); put("mid", "m9"); put("ts", 1L) })
         until("ana reads it") { ana.engine.thread(beto.pubkey).any { it["text"]!!.jsonPrimitive.content == "tras reiniciar" } }
     }
@@ -161,7 +169,7 @@ class EngineTest {
         val net = Net(); val ana = Person(net, "Ana"); val carla = Person(net, "Carla")
         carla.phone.raw(ana.phone, buildJsonObject { put("type", "CONTACT_ACCEPT"); put("nickname", "Carla") })
         delay(300)
-        assertTrue(ana.engine.contacts().isEmpty())
+        assertTrue(ana.people().isEmpty())
     }
 
     @Test fun aForgedSenderIsDropped() = runBlocking {
@@ -170,7 +178,7 @@ class EngineTest {
         beto.engine.addByCode(ana.engine.pairingCode!!, "")
         until("request") { ana.engine.requests().isNotEmpty() }
         ana.engine.acceptRequest(beto.pubkey)
-        until("contacts") { beto.engine.contacts().isNotEmpty() }
+        until("contacts") { beto.people().isNotEmpty() }
         // Eve seals with HER key but claims to be Beto: the key does not belong to Beto.
         eve.phone.forge(ana.phone, beto.pubkey, buildJsonObject { put("type", "DM"); put("text", "soy beto"); put("mid", "f1"); put("ts", 1) })
         delay(300)
@@ -194,6 +202,86 @@ class EngineTest {
         until("ana has the request") { ana.engine.requests().isNotEmpty() }
         // Ana, instead of accepting, adds Beto by his code: that is accepting.
         ana.engine.addByCode(beto.engine.pairingCode!!, "")
-        until("both are contacts") { ana.engine.contacts().isNotEmpty() && beto.engine.contacts().isNotEmpty() }
+        until("both are contacts") { ana.people().isNotEmpty() && beto.people().isNotEmpty() }
+    }
+
+    // ---------- by ACCOUNT, and the fixed Dotrino contact (PWA 0.5.0) ----------
+
+    /** An account with its own profile key [owner] and these devices: its card, signed by the owner. */
+    private suspend fun cardFor(owner: SoftKeys, vararg devices: SoftKeys): JsonObject {
+        val body = buildJsonObject {
+            put("v", 1); put("profileId", owner.publickey); put("seq", 1); put("sealedBy", owner.publickey)
+            put("keys", buildJsonArray { devices.forEach { d -> add(buildJsonObject { put("pub", d.publickey); put("encPub", d.encPub) }) } })
+            put("iat", 1L)
+        }
+        return JsonObject(body + ("sig" to JsonPrimitive(owner.sign(Canonical.stringify(body)))))
+    }
+    private fun acta(card: JsonObject) = buildJsonObject { put("card", card) }
+    private fun key(o: JsonObject) = o["publickey"]!!.jsonPrimitive.content
+
+    @Test fun dotrinoIsAFixedContactThatCannotBeRemovedOrBlocked() = runBlocking {
+        val net = Net(); val ana = Person(net, "Ana")
+        val dotrino = MessengerEngine.DOTRINO_ACCOUNT
+        assertTrue(ana.engine.contacts().any { ana.engine.isPinned(key(it)) })
+        assertFalse("no device of Dotrino is known before it writes", ana.engine.canWrite(dotrino))
+        val e = runCatching { ana.engine.setBlocked(dotrino, true) }.exceptionOrNull() as MessengerEngine.EngineError
+        assertEquals("pinned-contact", e.code)
+        assertFalse(ana.engine.isBlocked(dotrino))
+        ana.peers.removeContact(dotrino)                         // removed from another app sharing the book
+        assertTrue("it comes back", ana.engine.contacts().any { ana.engine.isPinned(key(it)) })
+    }
+
+    @Test fun theDotrinoAccountWritesFromAnyDeviceAndIsAcceptedAlone() = runBlocking {
+        val net = Net(); val owner = SoftKeys(); val d1 = SoftKeys()
+        val ana = Person(net, "Ana", pinned = owner.publickey)
+        val dotrino = Person(net, "Dotrino", d1, acta(cardFor(owner, d1)))
+        // Dotrino answers an email: a request to the key that signed it (the #to= link).
+        dotrino.engine.addByLink(ana.pubkey, "Ana", null)
+        until("ana accepted it by herself") { dotrino.people().isNotEmpty() }
+        assertTrue("never in the inbox", ana.engine.requests().isEmpty())
+        assertTrue(ana.notices.none { it.kind == "request" })
+        assertTrue(ana.engine.canWrite(owner.publickey))
+        dotrino.engine.sendDM(ana.pubkey, "respuesta")
+        until("ana reads it, under the Dotrino account") { ana.engine.thread(owner.publickey).any { it["text"]!!.jsonPrimitive.content == "respuesta" } }
+        assertEquals(listOf(owner.publickey), ana.engine.contacts().map(::key).filter { ana.engine.isPinned(it) })
+    }
+
+    @Test fun aContactIsTheirAccountAndEveryDeviceGetsTheMessage() = runBlocking {
+        val net = Net(); val owner = SoftKeys(); val k1 = SoftKeys(); val k2 = SoftKeys()
+        val card = cardFor(owner, k1, k2)
+        val ana = Person(net, "Ana"); val b1 = Person(net, "Beto1", k1, acta(card)); val b2 = Person(net, "Beto2", k2, acta(card))
+        until("ana has a code") { ana.engine.pairingCode != null }
+        b1.engine.addByCode(ana.engine.pairingCode!!, "")
+        until("ana gets the request") { ana.engine.requests().any { it.dir == "in" } }
+        assertEquals("kept by the account, not the device", owner.publickey, ana.engine.requests().single().pubkey)
+        ana.engine.acceptRequest(owner.publickey)
+        until("beto sees ana") { b1.people().isNotEmpty() }
+        assertEquals(listOf(owner.publickey), ana.people().map(::key))
+        ana.engine.sendDM(owner.publickey, "a los dos")
+        until("both devices got it") { b1.phone.got.contains("DM") && b2.phone.got.contains("DM") }
+    }
+
+    @Test fun aLinkWithTheCardReachesEveryDevice() = runBlocking {
+        val net = Net(); val owner = SoftKeys(); val k1 = SoftKeys(); val k2 = SoftKeys()
+        val card = cardFor(owner, k1, k2)
+        val ana = Person(net, "Ana"); val b1 = Person(net, "Beto1", k1, acta(card)); val b2 = Person(net, "Beto2", k2, acta(card))
+        ana.engine.addByLink(k1.publickey, "Beto", card)
+        until("both devices got the request") { b1.engine.requests().any { it.dir == "in" } && b2.engine.requests().any { it.dir == "in" } }
+        assertEquals(owner.publickey, ana.engine.requests().single().pubkey)
+        b2.engine.acceptRequest(ana.pubkey)                      // accepted on the OTHER device
+        until("ana has beto by his account") { ana.people().map(::key) == listOf(owner.publickey) }
+        assertEquals("Beto", ana.people().single()["nickname"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun aContactKeptByADeviceMovesToItsAccountWithItsThread() = runBlocking {
+        val net = Net(); val owner = SoftKeys(); val k1 = SoftKeys()
+        val ana = Person(net, "Ana"); val b1 = Person(net, "Beto", k1, acta(cardFor(owner, k1)))
+        ana.peers.addContact(b1.pubkey, nickname = "Beto de antes")      // a contact from before 0.5.0
+        ana.threads.put(b1.pubkey, buildJsonObject { put("id", "m1"); put("dir", "in"); put("text", "viejo"); put("ts", 1L) })
+        b1.peers.addContact(ana.pubkey, nickname = "Ana")
+        b1.engine.sendHelloTo(ana.pubkey)
+        until("moved to the account") { ana.people().map(::key) == listOf(owner.publickey) }
+        assertEquals("Beto de antes", ana.people().single()["nickname"]!!.jsonPrimitive.content)
+        assertEquals(listOf("viejo"), ana.engine.thread(owner.publickey).map { it["text"]!!.jsonPrimitive.content })
     }
 }

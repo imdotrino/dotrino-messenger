@@ -45,6 +45,9 @@ import java.util.Locale
  * a conversation returns to the list; from the list, leaves. Plain native views.
  */
 class MainActivity : Activity() {
+    /** Whom a `#to=` link asks to add: their key, the nickname, and their card if it came. */
+    data class LinkPeer(val pubkey: String, val nickname: String, val card: kotlinx.serialization.json.JsonObject?)
+
     companion object {
         private const val REQ_CAMERA = 11
         private const val REQ_NOTIF = 12
@@ -53,6 +56,20 @@ class MainActivity : Activity() {
         /** The same translation as the proxy: only what it never emits is mapped. */
         private val CONFUSABLES = mapOf('I' to '1', 'L' to '1', 'S' to '5', 'Z' to '2', 'B' to '8', 'G' to '6', '0' to 'O')
         fun normalize(raw: String) = raw.uppercase().filter { it != ' ' && it != '-' && it != '_' }.map { CONFUSABLES[it] ?: it }.joinToString("")
+        /**
+         * `#to=<key>&nick=…&card=…`: the feedback email's link so Dotrino can answer. The key and the
+         * card go in base64url; the card is checked by the engine (its profile signed it).
+         */
+        fun peerFrom(fragment: String?): LinkPeer? {
+            val f = fragment ?: return null
+            fun param(k: String) = Regex("(?:^|&)$k=([^&]+)").find(f)?.groupValues?.get(1)
+            fun b64(s: String) = String(android.util.Base64.decode(s, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+            val pubkey = param("to")?.let { runCatching { b64(it) }.getOrNull() } ?: return null
+            if (runCatching { kotlinx.serialization.json.Json.parseToJsonElement(pubkey) }.isFailure) return null
+            val nick = param("nick")?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.take(40) ?: ""
+            val card = param("card")?.let { c -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(b64(c)) as? kotlinx.serialization.json.JsonObject }.getOrNull() }
+            return LinkPeer(pubkey, nick, card)
+        }
         fun codeFrom(text: String): String = normalize(Regex("[#&?]add=([^&\\s]+)", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1) ?: text).take(6)
     }
 
@@ -67,6 +84,7 @@ class MainActivity : Activity() {
     private var addSheet: Pair<Dialog, AddSheet>? = null
     private var scanDialog: Dialog? = null
     private var pendingCode: String? = null
+    private var pendingPeer: LinkPeer? = null
     private lateinit var notify: Notify
 
     override fun attachBaseContext(base: Context) = super.attachBaseContext(DotrinoLocale.wrap(base))
@@ -77,6 +95,7 @@ class MainActivity : Activity() {
         notify = Notify(this)
         open = savedInstanceState?.getString("open")
         pendingCode = codeIn(intent)
+        pendingPeer = peerFrom(intent?.data?.fragment)
         setContentView(shell())
         boot()
     }
@@ -86,6 +105,7 @@ class MainActivity : Activity() {
         setIntent(intent)
         // The app already open also receives the QR link (launchMode singleTask).
         codeIn(intent)?.let { pendingCode = it; if (engine?.hasNickname == true) openAdd(it) }
+        peerFrom(intent.data?.fragment)?.let { pendingPeer = it; if (engine?.hasNickname == true) openAdd(null, peer = it) }
         intent.getStringExtra(Notify.EXTRA_CONTACT)?.let { openConversation(it) }
     }
 
@@ -123,6 +143,7 @@ class MainActivity : Activity() {
                 render()
                 intent.getStringExtra(Notify.EXTRA_CONTACT)?.let { openConversation(it) }
                 pendingCode?.let { if (e.hasNickname) openAdd(it) }
+                pendingPeer?.let { if (e.hasNickname) openAdd(null, peer = it) }
             } catch (e: Messenger.BootError) {
                 when (e.code) {
                     "no-identity-app" -> { IdentityRequired.show(this@MainActivity); showProblem(t("native.noIdentityApp")) }
@@ -232,7 +253,7 @@ class MainActivity : Activity() {
             card.add(label(t("welcome.helper"), 13f, col(R.color.m_muted)), top = 8)
             card.add(pill(t("welcome.submit"), filled = true) {
                 val n = MessengerEngine.sanitizeNickname(input.text.toString())
-                if (n.isNotEmpty()) { e.nickname = n; render(); pendingCode?.let { openAdd(it) } }
+                if (n.isNotEmpty()) { e.nickname = n; render(); pendingCode?.let { openAdd(it) }; pendingPeer?.let { openAdd(null, peer = it) } }
             }.apply { tag = "nickname-submit" }, top = 16)
             card.add(label(t("native.welcomeInfo"), 13f, col(R.color.m_muted)), top = 14)
             add(card, top = 24)
@@ -338,11 +359,12 @@ class MainActivity : Activity() {
     private fun closeConversation() { open = null; engine?.active = null; render() }
 
     /** «Add contact»; [mine] = straight to «My code» (the chip of the bar: to show mine, not type theirs). */
-    private fun openAdd(code: String?, mine: Boolean = false) {
+    private fun openAdd(code: String?, mine: Boolean = false, peer: LinkPeer? = null) {
         val e = engine ?: return
         pendingCode = null
+        pendingPeer = null
         addSheet?.first?.dismiss()
-        val s = AddSheet(this, e, code, ::openScanner, if (mine) "mine" else "add")
+        val s = AddSheet(this, e, code, ::openScanner, if (mine) "mine" else "add", peer)
         addSheet = s.dialog to s
         s.dialog.setOnDismissListener { if (addSheet?.second === s) addSheet = null }
         s.dialog.show()
