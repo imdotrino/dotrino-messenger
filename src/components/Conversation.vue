@@ -274,10 +274,10 @@ const grouped = computed(() => {
   max-width: 65%;
   padding: 10px 14px;
   border-radius: 14px;
-  background: #ffffff;
+  background: var(--dt-surface);
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 1px rgba(0, 101, 140, 0.04);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--dt-accent) 4%, transparent);
   position: relative;
   line-height: 1.45;
 }
@@ -287,7 +287,7 @@ const grouped = computed(() => {
   color: var(--on-accent);
   border: 0;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 1px 2px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--dt-accent) 25%, transparent);
 }
 .text {
   white-space: pre-wrap;
@@ -301,7 +301,7 @@ const grouped = computed(() => {
   margin-top: 4px;
   opacity: 0.75;
 }
-.msg.out .meta { color: rgba(255, 255, 255, 0.85); }
+.msg.out .meta { color: color-mix(in srgb, var(--dt-accent-ink) 85%, transparent); }
 .msg.in  .meta { color: var(--muted); }
 .check { font-size: 12px; }
 
@@ -342,7 +342,7 @@ const grouped = computed(() => {
   max-height: 120px;
   padding: 9px 16px;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--dt-surface);
   border: 1px solid var(--border);
   font-size: 14.5px;
   line-height: 1.4;
@@ -358,7 +358,7 @@ const grouped = computed(() => {
   display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   transition: background 150ms ease-out, transform 100ms ease-out;
-  box-shadow: 0 1px 3px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--dt-accent) 25%, transparent);
 }
 .send:hover:not(:disabled) { background: var(--accent-2); }
 .send:active:not(:disabled) { transform: scale(0.95); }

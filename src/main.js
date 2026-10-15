@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { registerSW } from 'virtual:pwa-register'
+import '@dotrino/theme/theme.css'
 import './style.css'
 import App from './App.vue'
 // <dotrino-support> ya NO se importa aquí: lo trae <dotrino-topbar> (§5), que es

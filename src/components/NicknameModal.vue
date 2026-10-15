@@ -75,7 +75,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
   width: 64px; height: 64px;
   margin: 0 auto 16px;
   border-radius: var(--radius);
-  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--dt-accent) 25%, transparent);
 }
 .brand h1 {
   margin: 0;
@@ -123,7 +123,7 @@ onMounted(() => { try { inputEl.value?.focus() } catch (_) {} })
   font-size: 12px;
   color: var(--muted);
   pointer-events: none;
-  background: #ffffff;
+  background: var(--dt-surface);
   padding: 0 4px;
 }
 .helper {

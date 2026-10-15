@@ -271,25 +271,11 @@ const topbarRef = ref(null)
 const identityInst = ref(null)
 const reputationInst = ref(null)
 
-// Tema de la tarjeta de perfil (vars --ccp-*): «Cool & Cozy», los mismos valores que el home.
-const profileTheme = {
-  '--ccp-bg': '#ffffff', '--ccp-bg-2': '#f4f7f9', '--ccp-bg-3': '#eaeff3', '--ccp-bg-4': '#e3e9ed',
-  '--ccp-border': '#cfd8de', '--ccp-text': '#181c1e', '--ccp-muted': '#4a5560',
-  '--ccp-accent': '#00658c', '--ccp-accent-2': '#00506f', '--ccp-accent-text': '#ffffff',
-  '--ccp-gold': '#c98a00', '--ccp-derived': '#b07f00',
-  '--ccp-online': '#00897b', '--ccp-affinity': '#2f8fd6', '--ccp-input-bg': '#f1f4f6',
-  '--ccp-radius': '16px',
-  '--ccp-font': '"Quicksand", system-ui, sans-serif',
-  '--ccp-font-headline': '"Quicksand", system-ui, sans-serif',
-  '--ccp-font-mono': '"JetBrains Mono", ui-monospace, monospace',
-}
-
 watchEffect(() => {
   const tb = topbarRef.value
   if (!tb) return
   tb.identity = identityInst.value ?? null
   tb.reputation = reputationInst.value ?? null
-  tb.profileTheme = profileTheme
 })
 
 // El estado del respaldo en la bóveda, a la vista en el botón de perfil (topbar ≥ 0.13).
@@ -356,7 +342,7 @@ const maybeStartTutorial = () => {
       icon="/icons/icon-192.png"
       brand-href="./"
       :lang.attr="lang"
-      profile
+      profile theme
       support-href="https://ko-fi.com/dotrino"
       support-repo="imdotrino/dotrino-messenger"
       support-discord="https://discord.gg/D648uq7cth"
@@ -474,14 +460,7 @@ const maybeStartTutorial = () => {
 .topbar {
   display: block;
   flex-shrink: 0;
-  --dotrino-topbar-bg: var(--bg-1);
-  --dotrino-topbar-border: var(--border);
-  --dotrino-topbar-text: var(--text);
-  --dotrino-topbar-muted: var(--muted);
-  --dotrino-topbar-accent: var(--accent);
-  --dotrino-topbar-accent-text: var(--on-accent);
   --dotrino-topbar-pad: 12px 20px;
-  --dotrino-topbar-font: var(--font-body);
 }
 .topbar::part(brand-icon) { width: 36px; height: 36px; border-radius: 0; object-fit: contain; }
 .topbar::part(brand-name) { font-family: var(--font-brand); font-weight: 700; font-size: 17px; }
@@ -516,7 +495,7 @@ const maybeStartTutorial = () => {
   font-size: 13px;
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.dot.on  { background: var(--online); box-shadow: 0 0 0 2px rgba(0, 137, 123, 0.18); }
+.dot.on  { background: var(--online); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-ok) 18%, transparent); }
 .dot.off { background: var(--accent); opacity: 0.6; }
 .who { color: var(--text); font-weight: 500; }
 .tok {
@@ -537,7 +516,7 @@ const maybeStartTutorial = () => {
 .cc-install {
   --cc-install-color: var(--accent);
   --cc-install-accent: var(--accent);
-  --cc-install-bg-hover: rgba(var(--accent-rgb), 0.08);
+  --cc-install-bg-hover: color-mix(in srgb, var(--dt-accent) 8%, transparent);
   --cc-install-radius: 8px;
   --cc-install-font-size: 13px;
 }
@@ -596,7 +575,7 @@ const maybeStartTutorial = () => {
   font-weight: 700;
   cursor: pointer;
   transition: background 150ms ease-out, transform 100ms ease-out;
-  box-shadow: 0 1px 3px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--dt-accent) 25%, transparent);
 }
 .add-btn:hover { background: var(--accent-2); }
 .add-btn:active { transform: translateY(1px); }

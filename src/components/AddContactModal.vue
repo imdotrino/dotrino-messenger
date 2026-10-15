@@ -287,9 +287,9 @@ const pasteToken = async () => {
 }
 .tab:hover { color: var(--text); }
 .tab.active {
-  background: #ffffff;
+  background: var(--dt-surface);
   color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 101, 140, 0.08);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--dt-accent) 8%, transparent);
 }
 
 .tab-pane { display: flex; flex-direction: column; gap: 16px; }
@@ -385,7 +385,7 @@ const pasteToken = async () => {
 }
 .my-token code {
   flex: 1;
-  background: #ffffff;
+  background: var(--dt-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
