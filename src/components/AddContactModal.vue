@@ -86,7 +86,7 @@ const submitToPeer = async () => {
   errorKey.value = ''
   enviando.value = true
   try {
-    await threads.sendContactRequest({ token: null, pubkey: props.peer.pubkey, alias: (nicknameInput.value || '').trim() })
+    await threads.sendContactRequest({ token: null, pubkey: props.peer.pubkey, alias: (nicknameInput.value || '').trim(), card: props.peer.card || null })
     emit('close')
   } catch (e) {
     console.warn('[cc-add-contact] contact request failed', e?.code || '', e?.message)

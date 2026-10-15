@@ -6,8 +6,9 @@ import { test, expect, chromium } from '@playwright/test'
  *   · Dotrino es un contacto fijo: aparece sin agregarlo y no se puede quitar. Hasta que
  *     escriba no se conoce ninguno de sus aparatos, así que el campo de escribir se ve
  *     apagado y dice por qué.
- *   · El enlace `#to=<llave>&nick=…` (el que pone el correo de feedback) abre «añadir
- *     contacto» con esa persona puesta: la solicitud va por llave, sin código.
+ *   · El enlace `#to=<llave>&nick=…&card=…` (el que pone el correo de feedback) abre
+ *     «añadir contacto» con esa persona puesta: la solicitud va a los aparatos de su
+ *     tarjeta, sin código.
  *   · El contacto queda guardado por su cuenta (con tarjeta de perfil), y se escriben.
  *
  *   SITE_URL=http://localhost:4173 npx playwright test tests/cuenta.spec.js
@@ -51,7 +52,11 @@ test('Dotrino fijo, enlace #to= y contacto por cuenta', async () => {
   await expect.poll(() => store(beto.page, 'connection', (s) => s.myPublickey), { timeout: ESPERA }).toBeTruthy()
   const llave = await store(beto.page, 'connection', (s) => s.myPublickey)
   const b64 = Buffer.from(llave).toString('base64url')
-  await ana.page.goto(SITE + '/#to=' + b64 + '&nick=Beto')
+  // Con su tarjeta de perfil, como la pone el correo: se sella con las llaves que ella lista.
+  const card = await beto.page.evaluate(() => document.querySelector('dotrino-topbar').identity.profileCard())
+  expect(card, 'una cuenta recién creada ya tiene tarjeta').toBeTruthy()
+  const cardB64 = Buffer.from(JSON.stringify(card)).toString('base64url')
+  await ana.page.goto(SITE + '/#to=' + b64 + '&nick=Beto&card=' + cardB64)
   await expect(ana.page.getByTestId('to-info')).toContainText('Beto', { timeout: ESPERA })
   await ana.page.getByTestId('send-hello').click()
 

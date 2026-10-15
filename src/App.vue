@@ -75,7 +75,15 @@ const leerDestinoEntrante = () => {
     const pubkey = new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)))
     JSON.parse(pubkey)
     const n = h.match(/[#&]nick=([^&]+)/i)
-    return { pubkey, nickname: n ? decodeURIComponent(n[1]).slice(0, 40) : '' }
+    // Su tarjeta de perfil, si el enlace la trae: la verifica el vault al usarla.
+    const c = h.match(/[#&]card=([^&]+)/i)
+    let card = null
+    if (c) {
+      try {
+        card = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(c[1].replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0))))
+      } catch (e) { console.warn('[messenger] the #card= in the link is not readable:', e?.message) }
+    }
+    return { pubkey, nickname: n ? decodeURIComponent(n[1]).slice(0, 40) : '', card }
   } catch (e) {
     console.warn('[messenger] the #to= link does not carry a valid key:', e?.message)
     return null

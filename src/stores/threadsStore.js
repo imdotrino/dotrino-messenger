@@ -324,13 +324,27 @@ export const useThreadsStore = defineStore('threads', () => {
    * reaches any chat, and nobody is a contact of anybody until they accept.
    * `token` + `pubkey` come from redeeming their pairing code.
    */
-  const sendContactRequest = async ({ token, pubkey, alias }) => {
+  const sendContactRequest = async ({ token, pubkey, alias, card = null }) => {
     if (!pubkey) throw Object.assign(new Error('the pairing code did not say whose it is'), { code: 'no-peer-identity' })
     const me = await whoAmI()
     if (!me) throw Object.assign(new Error('identity vault unreachable'), { code: 'no-identity' })
     // If they already asked me, this is an acceptance: both sides want it.
     if (requests.get(pubkey, 'in')) { await acceptRequest(pubkey); return }
     const payload = { type: 'CONTACT_REQUEST', ...me }
+    // Con su TARJETA (el enlace #to= del correo la trae) se le escribe a todos sus aparatos
+    // con las llaves de cifrado que ella misma lista: no hace falta que las haya publicado
+    // en el proxio. Cuenta solo si el vault la adopta y prueba que esa llave es suya.
+    const account = card ? await adoptCardFor(card, pubkey) : null
+    if (account) {
+      let sent = 0
+      let last = null
+      for (const r of contacts.recipientsOf(account)) {
+        try { await connection.sendSealed(r.pubkey, payload, { peerEncPub: r.encPub }); sent++ } catch (e) { last = e }
+      }
+      if (!sent) throw last || Object.assign(new Error('no device of this account is known'), { code: 'no-devices' })
+      requests.upsert({ pubkey: account, dir: 'out', nickname: (alias || '').trim(), token: null, ts: Date.now() })
+      return
+    }
     if (token) await connection.sendSealedTo(token, payload, { peerPubkey: pubkey })
     else await connection.sendSealed(pubkey, payload)
     requests.upsert({ pubkey, dir: 'out', nickname: (alias || '').trim(), token: token || null, ts: Date.now() })
@@ -428,6 +442,23 @@ export const useThreadsStore = defineStore('threads', () => {
     }
   }
 
+  /** Adopta una tarjeta que llega por enlace; devuelve su cuenta si prueba que `pubkey` es suya. */
+  const adoptCardFor = async (card, pubkey) => {
+    // Copia plana: la que llega de la UI es un Proxy reactivo, y postMessage no lo clona.
+    card = JSON.parse(JSON.stringify(card))
+    try {
+      const id = await getIdentity()
+      await id?.adoptPeerCard?.(card)
+      await contacts.refresh()
+    } catch (e) {
+      console.warn('[messenger] the card in the link could not be adopted:', e?.message || e)
+      return null
+    }
+    const account = contacts.accountFromCard(card, pubkey)
+    if (!account) console.warn('[messenger] the card in the link does not prove that key: sending to the key alone')
+    return account
+  }
+
   /**
    * La CUENTA de quien escribe: la de su tarjeta si la firmó su perfil y la trajo el propio
    * aparato, o la llave del aparato si no hay tarjeta así. Es la llave con la que se guarda.
@@ -484,7 +515,7 @@ export const useThreadsStore = defineStore('threads', () => {
     contacts.markOnline(account, fromToken)
     // Already a contact (they reinstalled, lost us…): accept straight away.
     // And if I had asked them too, both sides want it.
-    if (known || requests.get(who.device, 'out')) {
+    if (known || requests.get(who.device, 'out') || requests.get(account, 'out')) {
       await becomeContacts(account, { nickname, token: fromToken, encryptionPubkey: who.encPub, device: who.device })
       await replyAccept(account)
       return
@@ -507,10 +538,11 @@ export const useThreadsStore = defineStore('threads', () => {
   const handleContactAccept = async (fromToken, who, payload) => {
     // Only counts if I asked — or if they are already a contact by their account (the
     // Dotrino one always is). Nobody adds themselves to my contacts.
-    const mine = requests.get(who.device, 'out')
     await noteProfile(who.pubkey, payload)
     const contact = await upgradeToAccount(who, payload)
     const account = contact?.publickey || accountOf(who, payload)
+    // Lo pedí a ese aparato, o a su cuenta entera (con su tarjeta, desde un enlace).
+    const mine = requests.get(who.device, 'out') || requests.get(account, 'out')
     if (!mine && !contact && !contacts.findByPubkey(account)) return
     await becomeContacts(account, {
       nickname: mine?.nickname || sanitizeNickname(payload.nickname || ''),
