@@ -13,7 +13,12 @@ import '@dotrino/qr'
 // en vez de mandar un saludo a ciegas.
 // `initialTab`: 'mine' cuando se llega tocando el código de la barra (se quiere enseñar el
 // propio, no teclear el de otro).
-const props = defineProps({ code: { type: String, default: '' }, initialTab: { type: String, default: 'add' } })
+// `peer`: llega con el enlace `#to=…` ({ pubkey, nickname }): ya se sabe a quién, sin código.
+const props = defineProps({
+  code: { type: String, default: '' },
+  peer: { type: Object, default: null },
+  initialTab: { type: String, default: 'add' }
+})
 const emit = defineEmits(['close'])
 const connection = useConnectionStore()
 const contacts = useContactsStore()
@@ -21,7 +26,8 @@ const threads = useThreadsStore()
 
 const tab = ref(props.initialTab === 'mine' ? 'mine' : 'add')   // 'add' | 'mine'
 const tokenInput = ref(props.code || '')
-const nicknameInput = ref('')
+const nicknameInput = ref(props.peer?.nickname || '')
+const toInfo = computed(() => t.value.add.toInfo.replace('{nick}', props.peer?.nickname || t.value.add.toNoNick))
 // Guardamos la CLAVE del error, no el texto ya traducido: así el mensaje sigue al
 // idioma si el usuario cambia el toggle con el modal abierto.
 const errorKey = ref('')
@@ -75,7 +81,23 @@ const onScanned = async (ev) => {
   await submit()
 }
 
+/** Solicitud a la llave del enlace `#to=`: no hay código que canjear. */
+const submitToPeer = async () => {
+  errorKey.value = ''
+  enviando.value = true
+  try {
+    await threads.sendContactRequest({ token: null, pubkey: props.peer.pubkey, alias: (nicknameInput.value || '').trim() })
+    emit('close')
+  } catch (e) {
+    console.warn('[cc-add-contact] contact request failed', e?.code || '', e?.message)
+    errorKey.value = 'errSend'
+  } finally {
+    enviando.value = false
+  }
+}
+
 const submit = async () => {
+  if (props.peer) return submitToPeer()
   errorKey.value = ''
   const code = normalizar(tokenInput.value)
   if (!CODE_RE.test(code)) {
@@ -144,7 +166,20 @@ const pasteToken = async () => {
           <button :class="['tab', tab === 'mine' && 'active']" @click="tab = 'mine'" data-testid="share-my-token-tab">{{ t.add.tabMine }}</button>
         </div>
 
-        <div v-if="tab === 'add'" class="tab-pane">
+        <div v-if="tab === 'add' && peer" class="tab-pane">
+          <div class="info-card">
+            <span class="info-icon">⌬</span>
+            <p data-testid="to-info">{{ toInfo }}</p>
+          </div>
+          <label class="field">
+            <span class="field-label">{{ t.add.fieldAlias }}</span>
+            <input v-model="nicknameInput" :placeholder="t.add.phAlias" maxlength="40" />
+          </label>
+          <p v-if="errorText" class="error">{{ errorText }}</p>
+          <p class="hint">{{ t.add.hint }}</p>
+        </div>
+
+        <div v-else-if="tab === 'add'" class="tab-pane">
           <div class="info-card">
             <span class="info-icon">⌬</span>
             <p>{{ t.add.info }}</p>

@@ -16,6 +16,14 @@ import { MINE as MI_VERSION, revisar } from '../services/compat'
 // "tormenta de HELLO": un saludo de respuesta es a su vez un saludo, y dos contactos en
 // línea entraban en ping-pong. Los tokens son de una conexión: al reconectar, se re-saluda.
 const greetedTokens = new Set()
+// Token vivo de cada APARATO (llave → token) de esta sesión. Un contacto puede tener
+// varios aparatos encendidos a la vez, y a cada uno se le escribe por su camino más
+// directo (§ transporte): por token si está en línea, por llave si no.
+const deviceTokens = new Map()
+// Tokens a los que ya les dijimos quiénes somos (el saludo del transporte, `helloTo`).
+// Quien recibe por token solo sabe de quién viene si alguna punta saludó: con una solicitud
+// que llegó por llave (el enlace #to=), nadie lo había hecho, y la respuesta se descartaba.
+const transportGreeted = new Set()
 
 // "Avalado por tu red": alguien en quien confías (directo/transitivo) tiene una
 // atestación sobre este pubkey. Si sí → la solicitud notifica; si no → silenciosa.
@@ -215,17 +223,33 @@ export const useThreadsStore = defineStore('threads', () => {
   // ------------------------------------------------------------------------
 
   /**
-   * Seal `payload` to a contact. With a live token it goes by token (the only road that
-   * can go up to WebRTC); without one, by pubkey (the proxy's 24 h offline queue).
+   * Seal `payload` to a contact: to EVERY device of their account (their profile card),
+   * each one by its most direct road — by token if it is online this session (the only
+   * road that can go up to WebRTC), by pubkey if not (the proxy's 24 h offline queue).
+   * It fails only if no device could be reached; the same message twice is dropped by
+   * its id on the other side.
    * `quiet`: queue it without ringing their phone (presence can wait).
    */
   const sendToContact = async (pubkey, payload, { quiet = false } = {}) => {
     const c = contacts.findByPubkey(pubkey)
     if (!c) throw Object.assign(new Error('not a contact'), { code: 'not-contact' })
-    const peerEncPub = c.encryptionPubkey || undefined
-    const token = contacts.liveTokenFor(pubkey)
-    if (token) await connection.sendSealedTo(token, payload, { peerPubkey: pubkey, peerEncPub })
-    else await connection.sendSealed(pubkey, payload, { peerEncPub, quiet })
+    const recipients = contacts.recipientsOf(c.publickey)
+    if (!recipients.length) throw Object.assign(new Error('no device of this account is known yet'), { code: 'no-devices' })
+    let sent = 0
+    let last = null
+    for (const r of recipients) {
+      const token = deviceTokens.get(r.pubkey) ||
+        (recipients.length === 1 ? contacts.liveTokenFor(c.publickey) : null)
+      try {
+        if (token) {
+          if (!transportGreeted.has(token)) { connection.wsProxyClient.helloTo(token); transportGreeted.add(token) }
+          await connection.sendSealedTo(token, payload, { peerPubkey: r.pubkey, peerEncPub: r.encPub })
+        }
+        else await connection.sendSealed(r.pubkey, payload, { peerEncPub: r.encPub, quiet })
+        sent++
+      } catch (e) { last = e }
+    }
+    if (!sent) throw last
   }
 
   const whoAmI = async () => {
@@ -280,6 +304,8 @@ export const useThreadsStore = defineStore('threads', () => {
     try {
       const me = await whoAmI()
       if (!me) return
+      // Una cuenta sin aparatos conocidos (Dotrino antes de escribir) no tiene a quién saludar.
+      if (!contacts.recipientsOf(pubkey).length) return
       await sendToContact(pubkey, { type: 'HELLO', ...me }, { quiet: true })
     } catch (e) { console.warn('[messenger] hello failed:', e?.code || '', e?.message) }
   }
@@ -337,7 +363,7 @@ export const useThreadsStore = defineStore('threads', () => {
     if (!claimed || !senderEncPub) return null
     const contact = contacts.findBySender(claimed)
     if (contact && knownEncPubs(contact).some(k => sameKey(k, senderEncPub))) {
-      return { pubkey: contact.publickey, contact, encPub: senderEncPub }
+      return { pubkey: contact.publickey, contact, encPub: senderEncPub, device: claimed }
     }
     let announced = null
     try { announced = await connection.encPubOf(claimed) } catch (e) {
@@ -348,7 +374,7 @@ export const useThreadsStore = defineStore('threads', () => {
       console.warn('[messenger] message sealed with a key that is not the sender\'s — dropped')
       return null
     }
-    return { pubkey: contact?.publickey || claimed, contact: contact || null, encPub: senderEncPub }
+    return { pubkey: contact?.publickey || claimed, contact: contact || null, encPub: senderEncPub, device: claimed }
   }
 
   const handleIncoming = async (fromToken, payload, meta = {}) => {
@@ -357,6 +383,7 @@ export const useThreadsStore = defineStore('threads', () => {
     if (!meta.sealed) return
     const who = await authenticate(fromToken, meta)
     if (!who) return
+    if (fromToken) deviceTokens.set(who.device, fromToken)
     // BLOQUEADO (indicador privado de la tarjeta de perfil): no entra nada suyo, ni mensajes
     // ni solicitudes, y no se le contesta — tampoco el acuse, que le diría que llegó.
     if (contacts.isBlocked(who.pubkey) || (meta.fromPubkey && contacts.isBlocked(meta.fromPubkey))) return
@@ -368,7 +395,7 @@ export const useThreadsStore = defineStore('threads', () => {
     // not to the inbox.
     if (!who.contact) return
     switch (payload.type) {
-      case 'HELLO':        return handleHello(fromToken, who.contact, payload)
+      case 'HELLO':        return handleHello(fromToken, who, payload)
       case 'DM':           return handleDM(fromToken, who.contact, payload, meta)
       case 'DM_ACK':       return handleAck(payload)
       case 'RATING_QUERY': return handleRatingQuery(who.contact, payload)
@@ -397,32 +424,80 @@ export const useThreadsStore = defineStore('threads', () => {
           console.warn('[messenger] the card of %s is signed by another device: not adopted silently', pubkey.slice(0, 24))
         }
       } catch (e) { console.warn('adoptPeerCard:', e?.message || e) }
+      await contacts.refresh()
     }
+  }
+
+  /**
+   * La CUENTA de quien escribe: la de su tarjeta si la firmó su perfil y la trajo el propio
+   * aparato, o la llave del aparato si no hay tarjeta así. Es la llave con la que se guarda.
+   */
+  const accountOf = (who, payload) =>
+    who.contact?.publickey || contacts.accountFromCard(payload.card, who.device) || who.pubkey
+
+  /**
+   * Un contacto de antes, guardado por la llave de un aparato, pasa a su cuenta en cuanto
+   * ese mismo aparato trae la tarjeta que lo prueba. Su hilo se va con él.
+   */
+  const upgradeToAccount = async (who, payload) => {
+    const c = who.contact
+    if (!c || !sameKey(c.publickey, who.device)) return c
+    const account = contacts.accountFromCard(payload.card, who.device)
+    if (!account || sameKey(account, c.publickey)) return c
+    try {
+      await contacts.moveToAccount(c.publickey, account)
+      await moveThread(c.publickey, account)
+      console.log('[messenger] contact moved from a device key to its account')
+    } catch (e) {
+      console.warn('[messenger] could not move the contact to its account:', e?.code || '', e?.message)
+      return c
+    }
+    return contacts.findByPubkey(account) || c
+  }
+
+  /** Lleva los mensajes de un hilo a otra clave (el del aparato al de la cuenta). */
+  const moveThread = async (from, to) => {
+    const arr = threads.value[from] || []
+    if (!arr.length) return
+    threads.value = mergeThreads(threads.value, { [to]: arr })
+    const { [from]: _old, ...rest } = threads.value
+    threads.value = rest
+    if (activePubkey.value === from) setActive(to)
+    saveLocalCache(threads.value)
+    const store = await getStore()
+    if (!store) return
+    for (const e of arr) await store.appendMessage(to, e)
   }
 
   const handleContactRequest = async (fromToken, who, payload) => {
     const nickname = sanitizeNickname(payload.nickname || '')
     await noteProfile(who.pubkey, payload)
+    const contact = await upgradeToAccount(who, payload)
+    const account = contact?.publickey || accountOf(who, payload)
+    if (contacts.isBlocked(account)) return
+    // Ya es contacto por su cuenta —la de Dotrino lo es siempre, o lo agregaste desde
+    // otro de sus aparatos—: se acepta igual que si fuera el mismo aparato.
+    const known = contact || contacts.findByPubkey(account)
     // Someone redeemed your code: a code is SINGLE USE, so the one on screen is burnt.
     // Ask for another one now, or the next friend types a dead one.
     connection.refreshPairingCode?.().catch?.(() => {})
-    contacts.markOnline(who.pubkey, fromToken)
+    contacts.markOnline(account, fromToken)
     // Already a contact (they reinstalled, lost us…): accept straight away.
     // And if I had asked them too, both sides want it.
-    if (who.contact || requests.get(who.pubkey, 'out')) {
-      await becomeContacts(who.pubkey, { nickname, token: fromToken, encryptionPubkey: who.encPub })
-      await replyAccept(who.pubkey)
+    if (known || requests.get(who.device, 'out')) {
+      await becomeContacts(account, { nickname, token: fromToken, encryptionPubkey: who.encPub, device: who.device })
+      await replyAccept(account)
       return
     }
-    const vouched = await isVouched(who.pubkey)
+    const vouched = await isVouched(account)
     requests.upsert({
-      pubkey: who.pubkey, dir: 'in', nickname, token: fromToken,
+      pubkey: account, dir: 'in', nickname, token: fromToken,
       encryptionPubkey: who.encPub, ts: Date.now(), vouched
     })
     notify('hello', {
-      id: 'request-' + who.pubkey,
-      fromPubkey: who.pubkey,
-      fromNickname: nickname || who.pubkey.slice(0, 8),
+      id: 'request-' + account,
+      fromPubkey: account,
+      fromNickname: nickname || account.slice(0, 8),
       text: '',
       ts: Date.now(),
       request: true
@@ -430,28 +505,38 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   const handleContactAccept = async (fromToken, who, payload) => {
-    // Only counts if I asked. Nobody adds themselves to my contacts.
-    const mine = requests.get(who.pubkey, 'out')
-    if (!mine && !who.contact) return
+    // Only counts if I asked — or if they are already a contact by their account (the
+    // Dotrino one always is). Nobody adds themselves to my contacts.
+    const mine = requests.get(who.device, 'out')
     await noteProfile(who.pubkey, payload)
-    await becomeContacts(who.pubkey, {
+    const contact = await upgradeToAccount(who, payload)
+    const account = contact?.publickey || accountOf(who, payload)
+    if (!mine && !contact && !contacts.findByPubkey(account)) return
+    await becomeContacts(account, {
       nickname: mine?.nickname || sanitizeNickname(payload.nickname || ''),
       token: fromToken,
-      encryptionPubkey: who.encPub
+      encryptionPubkey: who.encPub,
+      device: who.device
     })
-    contacts.markOnline(who.pubkey, fromToken)
+    contacts.markOnline(account, fromToken)
   }
 
-  const becomeContacts = async (pubkey, { nickname, token, encryptionPubkey }) => {
+  /**
+   * `pubkey` is the key the contact is kept by (their account when their card proves it);
+   * `device` the one that wrote, under which any pending request was filed.
+   */
+  const becomeContacts = async (pubkey, { nickname, token, encryptionPubkey, device = null }) => {
     const existing = contacts.findByPubkey(pubkey)
     await contacts.addContact({
-      pubkey,
+      // La misma llave puede venir escrita de otra forma: se queda en el registro que ya hay.
+      pubkey: existing?.publickey || pubkey,
       nickname: existing?.nickname || nickname || pubkey.slice(0, 8),
       token: token || undefined,
       encryptionPubkey: encryptionPubkey || existing?.encryptionPubkey,
       notes: undefined
     })
     requests.remove(pubkey)
+    if (device && device !== pubkey) requests.remove(device)
     flushOutbox()
   }
 
@@ -461,8 +546,9 @@ export const useThreadsStore = defineStore('threads', () => {
     await sendToContact(pubkey, { type: 'CONTACT_ACCEPT', ...me })
   }
 
-  const handleHello = async (fromToken, contact, payload) => {
-    await noteProfile(contact.publickey, payload)
+  const handleHello = async (fromToken, who, payload) => {
+    await noteProfile(who.contact.publickey, payload)
+    const contact = await upgradeToAccount(who, payload)
     const patch = { lastToken: fromToken }
     if (!contact.nickname && payload.nickname) patch.nickname = sanitizeNickname(payload.nickname)
     await contacts.updateContact(contact.publickey, patch)

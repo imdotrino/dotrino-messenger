@@ -32,7 +32,9 @@ const items = computed(() => {
         lastTs: last?.ts || c.lastSeen,
         unread: thread.filter(e => e.dir === 'in' && !e._read).length,
         rating: r,
-        blocked: contacts.isBlocked(c.publickey)
+        blocked: contacts.isBlocked(c.publickey),
+        // Dotrino, el contacto fijo: su propio testid para que las pruebas lo distingan.
+        pinned: contacts.isPinned(c.publickey)
       }
     })
     .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0))
@@ -68,7 +70,7 @@ const fmtTime = (ts) => {
       v-for="c in items"
       :key="c.publickey"
       class="item"
-      data-testid="contact-item"
+      :data-testid="c.pinned ? 'contact-dotrino' : 'contact-item'"
       :class="{ active: threads.activePubkey === c.publickey }"
       @click="emit('select', c.publickey)"
     >

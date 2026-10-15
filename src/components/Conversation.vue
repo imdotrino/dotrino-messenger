@@ -27,6 +27,12 @@ const rating = computed(() => c.value ? contacts.ratingFor(c.value.publickey) : 
 // Versión de la otra punta (§14). No bloquea nada: se enseña aquí, pegado a la
 // conversación, porque es donde la incompatibilidad se nota como «no me contesta».
 const compat = computed(() => c.value ? (threads.peerCompat[c.value.publickey] || '') : '')
+// Una cuenta de la que aún no se conoce ningún aparato (Dotrino antes de escribir): no hay
+// a quién mandarle nada. El campo se ve, apagado, con el motivo.
+const noDevices = computed(() => {
+  contacts.ratingTick
+  return !!c.value && contacts.recipientsOf(c.value.publickey).length === 0
+})
 
 const stars = (val) => {
   if (val == null) return ''
@@ -130,16 +136,18 @@ const grouped = computed(() => {
       </template>
     </div>
 
+    <p v-if="noDevices" class="no-devices" role="status" data-testid="no-devices">{{ t.conv.noDevices }}</p>
     <form class="composer" @submit.prevent="send">
       <button type="button" class="clip" :title="t.conv.attach">📎</button>
       <textarea
         v-model="text"
+        :disabled="noDevices"
         rows="1"
         :placeholder="t.conv.placeholder"
         data-testid="composer-input"
         @keydown.enter.exact.prevent="send"
       />
-      <button class="send" data-testid="send-message" :disabled="!text.trim()" type="submit" :title="t.conv.send">
+      <button class="send" data-testid="send-message" :disabled="noDevices || !text.trim()" type="submit" :title="t.conv.send">
         <span>➤</span>
       </button>
     </form>
@@ -147,6 +155,14 @@ const grouped = computed(() => {
 </template>
 
 <style scoped>
+.no-devices {
+  margin: 0;
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+}
 .conv { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg-1); }
 
 /* ----- Header ----- */

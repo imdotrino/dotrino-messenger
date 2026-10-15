@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { samePubkey } from '@dotrino/proxy-client'
 import { key as accountKey } from '../services/account'
 
 // SOLICITUDES de contacto, en los dos sentidos: las que te llegan (`dir: 'in'`, alguien
@@ -17,6 +18,9 @@ import { key as accountKey } from '../services/account'
 // al importar el módulo la cuenta todavía no está resuelta.
 const lsKey = () => accountKey('cc-requests-v1')
 const TTL_MS = 24 * 60 * 60 * 1000
+// La misma llave llega escrita de formas distintas (la del enlace #to=, la que da el
+// proxio): se compara por la llave, no por el texto.
+const same = (a, b) => { try { return a === b || (!!a && !!b && samePubkey(a, b)) } catch (_) { return false } }
 
 function loadInitial () {
   try {
@@ -47,7 +51,7 @@ export const useRequestsStore = defineStore('requests', () => {
   const upsert = (entry) => {
     prune()
     const dir = dirOf(entry)
-    const i = requests.value.findIndex(r => r.pubkey === entry.pubkey && dirOf(r) === dir)
+    const i = requests.value.findIndex(r => same(r.pubkey, entry.pubkey) && dirOf(r) === dir)
     if (i >= 0) {
       requests.value[i] = { ...requests.value[i], ...entry, dir, ts: requests.value[i].ts }
     } else {
@@ -58,11 +62,11 @@ export const useRequestsStore = defineStore('requests', () => {
 
   /** Quita las solicitudes de esa persona: las de un sentido, o las dos si no se dice. */
   const remove = (pubkey, dir) => {
-    requests.value = requests.value.filter(r => !(r.pubkey === pubkey && (!dir || dirOf(r) === dir)))
+    requests.value = requests.value.filter(r => !(same(r.pubkey, pubkey) && (!dir || dirOf(r) === dir)))
     persist()
   }
 
-  const get = (pubkey, dir = 'in') => { prune(); return requests.value.find(r => r.pubkey === pubkey && dirOf(r) === dir) || null }
+  const get = (pubkey, dir = 'in') => { prune(); return requests.value.find(r => same(r.pubkey, pubkey) && dirOf(r) === dir) || null }
 
   /** Las que te llegaron (las que se cuentan en la campana). */
   const incoming = computed(() => requests.value.filter(r => dirOf(r) === 'in'))

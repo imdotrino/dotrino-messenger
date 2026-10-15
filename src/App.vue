@@ -62,16 +62,41 @@ const leerCodigoEntrante = () => {
 let incomingCode = leerCodigoEntrante()
 const pendingCode = ref('')
 /**
+ * Enlace entrante `#to=<llave>&nick=<apodo>`: escribirle a alguien de quien se tiene la
+ * llave pero no un código. Lo pone el correo de feedback.dotrino.com para que la cuenta de
+ * Dotrino conteste a quien pidió algo. La llave va en base64url y en el #fragment.
+ */
+const leerDestinoEntrante = () => {
+  const h = location.hash || ''
+  const m = h.match(/[#&]to=([^&]+)/i)
+  if (!m) return null
+  try {
+    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/')
+    const pubkey = new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)))
+    JSON.parse(pubkey)
+    const n = h.match(/[#&]nick=([^&]+)/i)
+    return { pubkey, nickname: n ? decodeURIComponent(n[1]).slice(0, 40) : '' }
+  } catch (e) {
+    console.warn('[messenger] the #to= link does not carry a valid key:', e?.message)
+    return null
+  }
+}
+let incomingPeer = leerDestinoEntrante()
+const pendingPeer = ref(null)
+/**
  * Abre "añadir contacto" con el código del enlace ya escrito. Se llama en los dos
  * caminos por los que se llega a tener cuenta: la visita normal y la de quien
  * acaba de crearse el apodo — al recién llegado es a quien MÁS le duele perder el
  * código con el que venía.
  */
 const usarCodigoEntrante = () => {
-  const code = incomingCode || leerCodigoEntrante()
-  if (!code) return
+  const peer = incomingPeer || leerDestinoEntrante()
+  const code = peer ? '' : (incomingCode || leerCodigoEntrante())
+  if (!peer && !code) return
   incomingCode = ''
+  incomingPeer = null
   pendingCode.value = code
+  pendingPeer.value = peer
   showAdd.value = true
   try { history.replaceState(null, '', location.pathname + location.search) } catch (_) {}
 }
@@ -394,7 +419,7 @@ const maybeStartTutorial = () => {
       </section>
     </main>
 
-    <AddContactModal v-if="showAdd" :code="pendingCode" :initial-tab="addTab" @close="showAdd = false; pendingCode = ''; addTab = 'add'" />
+    <AddContactModal v-if="showAdd" :code="pendingCode" :peer="pendingPeer" :initial-tab="addTab" @close="showAdd = false; pendingCode = ''; pendingPeer = null; addTab = 'add'" />
     <RatingModal v-if="ratingFor" :pubkey="ratingFor" @close="ratingFor = null" />
     <dotrino-notifications v-if="showNotif" :ref="bindNotif" modal :lang.attr="lang" @cc-notif-close="showNotif = false"></dotrino-notifications>
 

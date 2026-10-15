@@ -102,6 +102,8 @@ export const messages = {
       errOffline: 'Todavía no hay conexión. Espera un momento y vuelve a intentarlo.',
       errNoCode: 'Ese QR no lleva ningún código de contacto.',
       errSend: 'No se pudo enviar la solicitud.',
+      toInfo: 'Vas a enviarle una solicitud de contacto a {nick}. Cuando la acepte, podrás escribirle.',
+      toNoNick: 'esta persona',
     },
 
     list: {
@@ -132,6 +134,7 @@ export const messages = {
       attach: 'Adjuntar (próximamente)',
       placeholder: 'Escribe un mensaje…',
       send: 'Enviar',
+      noDevices: 'Dotrino te escribirá aquí cuando responda a lo que pediste por correo. Después podrás contestarle.',
     },
 
     requests: {
@@ -249,6 +252,8 @@ export const messages = {
       errOffline: 'There is no connection yet. Wait a moment and try again.',
       errNoCode: 'That QR does not carry a contact code.',
       errSend: 'The request could not be sent.',
+      toInfo: 'You are about to send a contact request to {nick}. Once they accept, you can write to them.',
+      toNoNick: 'this person',
     },
 
     list: {
@@ -278,6 +283,7 @@ export const messages = {
       attach: 'Attach (coming soon)',
       placeholder: 'Write a message…',
       send: 'Send',
+      noDevices: 'Dotrino will write to you here when it answers what you asked for by email. Then you can reply.',
     },
 
     requests: {
