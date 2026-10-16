@@ -24,7 +24,7 @@ const ESPERA = 45_000
 /** Marca de esta corrida: los apodos y los mensajes no se pisan entre pruebas. */
 const marca = Math.random().toString(36).slice(2, 6).toUpperCase()
 
-async function entrar (browser, apodo) {
+async function entrar (browser, apodo, { proxy } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   // El tutorial tapa la UI con burbujas y no es lo que se prueba aquí.
   await context.addInitScript(() => {
@@ -32,8 +32,12 @@ async function entrar (browser, apodo) {
       try { localStorage.setItem(`messenger.tutorial:seen:${id}`, '1') } catch (_) {}
     }
   })
+  // Fijar el proxio de casa: sin esto cada uno elige el más rápido, y el caso de dos
+  // nodos distintos sale o no según la suerte.
+  if (proxy) await context.addInitScript((u) => { try { localStorage.setItem('messenger_proxy_url', u) } catch (_) {} }, proxy)
   const page = await context.newPage()
   page.on('pageerror', (e) => console.log(`[${apodo}] PAGEERROR`, e.message))
+  if (process.env.DEBUG_CONSOLE) page.on('console', (m) => { if (/cc-conn|messenger|part|queue|WS error|error/i.test(m.text())) console.log(`[${apodo}]`, m.text().slice(0, 200)) })
   await page.goto(SITE, { waitUntil: 'domcontentloaded' })
   const nick = page.getByTestId('nickname-input')
   await nick.waitFor({ timeout: ESPERA })
@@ -123,10 +127,10 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
 })
 
 /**
- * FOTOS: una imagen grande se reduce en el aparato, sale sellada como cualquier mensaje y
- * la otra punta la ve, con su pie de foto. Y no se pierde al recargar (va en el almacén).
+ * FOTOS: la imagen sale TAL CUAL (no se toca el contenido del usuario), en partes por el
+ * transporte, y la otra punta recibe los mismos bytes. Y no se pierde al recargar.
  */
-test('un amigo le manda una foto al otro', async () => {
+test('un amigo le manda una foto al otro, byte a byte', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
   const ana = await entrar(browser, `Ana${marca}F`)
@@ -140,33 +144,167 @@ test('un amigo le manda una foto al otro', async () => {
     await abrirConversacion(ana)
     await abrirConversacion(beto)
 
-    // Una foto de 3000×2000 con ruido: pesa varios MB en PNG, así que tiene que reducirse.
+    // Un PNG de ~5 MB con ruido (no comprime): el tamaño de una foto de teléfono.
     const png = await beto.page.evaluate(() => {
       const c = document.createElement('canvas')
-      c.width = 3000; c.height = 2000
+      c.width = 1300; c.height = 1000
       const ctx = c.getContext('2d')
       const img = ctx.createImageData(c.width, c.height)
-      for (let i = 0; i < img.data.length; i++) img.data[i] = (i * 7919) % 251
+      for (let i = 0; i < img.data.length; i += 65536) crypto.getRandomValues(img.data.subarray(i, i + 65536))
+      for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255
       ctx.putImageData(img, 0, 0)
       return c.toDataURL('image/png').split(',')[1]
     })
     const pie = `mira esto ${marca}`
     await beto.page.getByTestId('composer-input').fill(pie)
-    await beto.page.getByTestId('image-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+    const t0 = Date.now()
+    await beto.page.getByTestId('file-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
 
     const recibida = ana.page.getByTestId('msg-in').filter({ hasText: pie })
-    await expect(recibida).toBeVisible({ timeout: ESPERA })
     const img = recibida.getByTestId('msg-image').locator('img')
     await expect(img).toBeVisible({ timeout: ESPERA })
-    const src = await img.getAttribute('src')
-    expect(src.startsWith('data:image/jpeg;base64,'), 'la foto llega recomprimida en JPEG').toBe(true)
-    expect(src.length * 0.75, 'la foto salió reducida').toBeLessThan(205 * 1024)
+    console.log(`foto de ${(png.length * 0.75 / 1048576).toFixed(1)} MB entregada en ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+    expect(await img.getAttribute('src'), 'llegan los mismos bytes, sin recomprimir').toBe(`data:image/png;base64,${png}`)
 
-    // Se ve también en quien la mandó, y sigue ahí al recargar.
-    await expect(beto.page.getByTestId('msg-out').getByTestId('msg-image')).toBeVisible({ timeout: ESPERA })
+    // Quien la mandó la ve con el acuse (✓), y la foto sigue ahí al recargar.
+    await expect(beto.page.getByTestId('msg-out').filter({ hasText: pie }).locator('.check')).toHaveText('✓', { timeout: ESPERA })
     await ana.page.reload()
     await abrirConversacion(ana)
     await expect(ana.page.getByTestId('msg-in').filter({ hasText: pie }).getByTestId('msg-image')).toBeVisible({ timeout: ESPERA })
+  } finally {
+    await ana.context.close().catch(() => {})
+    await beto.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
+/**
+ * FOTO A ALGUIEN DESCONECTADO: espera en el proxio (en el dotrino-content de su cuenta, hasta
+ * 8 MB) y llega entera cuando vuelve a abrir la app.
+ */
+test('una foto para alguien desconectado le llega al volver', async () => {
+  test.setTimeout(180_000)
+  const browser = await chromium.launch()
+  // En nodos distintos: Ana vive en proxy1 (su cola, en el content) y Beto escribe desde proxy2.
+  const ana = await entrar(browser, `Ana${marca}O`, { proxy: 'wss://proxy.dotrino.com' })
+  const beto = await entrar(browser, `Beto${marca}O`, { proxy: 'wss://proxy2.dotrino.com' })
+  try {
+    const codigoAna = await codigoDe(ana)
+    await beto.page.getByTestId('add-contact').click()
+    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('send-hello').click()
+    await aceptarSolicitud(ana)
+    await abrirConversacion(ana)
+    await abrirConversacion(beto)
+    // Que se hayan visto una vez (un texto de ida), y Ana cierra la app.
+    await escribir(beto, `antes ${marca}`)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `antes ${marca}` })).toBeVisible({ timeout: ESPERA })
+    await ana.page.close()
+    await beto.page.waitForTimeout(3000)
+
+    const png = await beto.page.evaluate(() => {
+      const c = document.createElement('canvas')
+      c.width = 1000; c.height = 800
+      const ctx = c.getContext('2d')
+      const img = ctx.createImageData(c.width, c.height)
+      for (let i = 0; i < img.data.length; i += 65536) crypto.getRandomValues(img.data.subarray(i, i + 65536))
+      for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255
+      ctx.putImageData(img, 0, 0)
+      return c.toDataURL('image/png').split(',')[1]
+    })
+    const pie = `mientras no estabas ${marca}`
+    await beto.page.getByTestId('composer-input').fill(pie)
+    await beto.page.getByTestId('file-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+    await beto.page.waitForTimeout(5000)
+
+    // Ana vuelve: la cola del proxio le entrega la foto entera.
+    ana.page = await ana.context.newPage()
+    await ana.page.goto(SITE, { waitUntil: 'domcontentloaded' })
+    await abrirConversacion(ana)
+    const img = ana.page.getByTestId('msg-in').filter({ hasText: pie }).getByTestId('msg-image').locator('img')
+    await expect(img).toBeVisible({ timeout: ESPERA })
+    console.log(`foto de ${(png.length * 0.75 / 1048576).toFixed(1)} MB entregada desde la cola`)
+    expect(await img.getAttribute('src')).toBe(`data:image/png;base64,${png}`)
+  } finally {
+    await ana.context.close().catch(() => {})
+    await beto.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
+/**
+ * CUALQUIER ARCHIVO, no solo fotos: llega con su nombre y se descarga con los mismos bytes.
+ * Y la conversación dice por dónde va el contacto y con qué tope.
+ */
+test('un archivo que no es foto llega con su nombre y se descarga igual', async () => {
+  test.setTimeout(180_000)
+  const browser = await chromium.launch()
+  const ana = await entrar(browser, `Ana${marca}P`)
+  const beto = await entrar(browser, `Beto${marca}P`)
+  try {
+    const codigoAna = await codigoDe(ana)
+    await beto.page.getByTestId('add-contact').click()
+    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('send-hello').click()
+    await aceptarSolicitud(ana)
+    await abrirConversacion(ana)
+    await abrirConversacion(beto)
+
+    // Con los dos conectados, la cabecera dice el camino (y no «desconectado»).
+    const ruta = beto.page.getByTestId('route')
+    await expect(ruta).not.toHaveAttribute('data-route', 'offline', { timeout: ESPERA })
+    console.log('camino:', await ruta.getAttribute('data-route'), '·', (await ruta.textContent()).trim())
+    if (process.env.SHOT) {
+      await beto.page.screenshot({ path: process.env.SHOT + '-desk.png' })
+      await beto.page.setViewportSize({ width: 390, height: 800 })
+      await beto.page.screenshot({ path: process.env.SHOT + '-movil.png' })
+      await beto.page.setViewportSize({ width: 1280, height: 900 })
+    }
+
+    const bytes = Buffer.from(Array.from({ length: 300_000 }, (_, i) => (i * 31) % 256))
+    await beto.page.getByTestId('file-input').setInputFiles({ name: 'informe final.pdf', mimeType: 'application/pdf', buffer: bytes })
+    const ficha = ana.page.getByTestId('msg-in').getByTestId('msg-file')
+    await expect(ficha.getByTestId('msg-file-name')).toHaveText('informe final.pdf', { timeout: ESPERA })
+    const [descarga] = await Promise.all([
+      ana.page.waitForEvent('download'),
+      ficha.getByTestId('msg-file-download').click()
+    ])
+    expect(descarga.suggestedFilename()).toBe('informe final.pdf')
+    const ruta2 = await descarga.path()
+    const fs2 = await import('node:fs')
+    expect(Buffer.compare(fs2.readFileSync(ruta2), bytes), 'se descargan los mismos bytes').toBe(0)
+  } finally {
+    await ana.context.close().catch(() => {})
+    await beto.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
+/**
+ * EL TOPE SE DICE: con el contacto desconectado, un archivo de más de 8 MB no se queda en el
+ * proxio. Se avisa al intentarlo y la burbuja dice que espera a que se conecte.
+ */
+test('un archivo grande para alguien desconectado avisa del tope y espera', async () => {
+  test.setTimeout(180_000)
+  const browser = await chromium.launch()
+  const ana = await entrar(browser, `Ana${marca}T`)
+  const beto = await entrar(browser, `Beto${marca}T`)
+  try {
+    const codigoAna = await codigoDe(ana)
+    await beto.page.getByTestId('add-contact').click()
+    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('send-hello').click()
+    await aceptarSolicitud(ana)
+    await abrirConversacion(ana)
+    await abrirConversacion(beto)
+    await escribir(beto, `antes ${marca}`)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `antes ${marca}` })).toBeVisible({ timeout: ESPERA })
+    await ana.page.close()
+    await expect(beto.page.getByTestId('route')).toHaveAttribute('data-route', 'offline', { timeout: ESPERA })
+
+    await beto.page.getByTestId('file-input').setInputFiles({ name: 'video.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(9 * 1024 * 1024, 7) })
+    await expect(beto.page.getByTestId('file-notice')).toContainText('8', { timeout: ESPERA })
+    await expect(beto.page.getByTestId('msg-out').getByTestId('msg-waits')).toHaveAttribute('data-waits', 'online', { timeout: ESPERA })
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})

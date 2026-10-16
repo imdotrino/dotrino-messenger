@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, watch, computed } from 'vue'
+import { ref, nextTick, watch, computed, onUnmounted } from 'vue'
 import { useThreadsStore } from '../stores/threadsStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { t, locale } from '../i18n'
@@ -12,19 +12,25 @@ import { t, locale } from '../i18n'
 // en la lista que en su ficha, y el avatar CAMBIABA al cambiar el apodo (que cambia
 // solo, en el saludo). El identicon no se mueve: la llave no cambia.
 import { avatarDataUri } from '@dotrino/identity/avatar'
+import { useConnectionStore } from '../stores/connectionStore'
+import { INLINE_IMAGE, LIMITS, fitsRoute, humanSize, downloadFile } from '../utils/file'
 
 
 const threads = useThreadsStore()
 const contacts = useContactsStore()
+const connection = useConnectionStore()
 const emit = defineEmits(['back', 'rate'])
 
 const text = ref('')
 const scroller = ref(null)
 const fileInput = ref(null)
-const sendingImage = ref(false)
-const imageError = ref('')
+const sendingFile = ref(false)
+const fileError = ref('')
+// Aviso de tope: el archivo no cabe por el camino de ahora y va a esperar (no es un error).
+const fileNotice = ref('')
 // La foto que se abre a pantalla completa (data URI), o null.
 const viewing = ref(null)
+
 
 const c = computed(() => threads.activeContact)
 const online = computed(() => c.value && contacts.isOnline(c.value.publickey))
@@ -38,6 +44,21 @@ const noDevices = computed(() => {
   contacts.ratingTick
   return !!c.value && contacts.recipientsOf(c.value.publickey).length === 0
 })
+
+// POR DÓNDE VA ESTE CONTACTO AHORA, y con qué tope (dueño, 2026-10-15). Se vuelve a
+// preguntar al cambiar de contacto, cuando el pilar avisa de un cambio de camino, al
+// conectarse o irse el contacto, y cada pocos segundos por si el canal pasó a ir por relevo.
+const route = ref('offline')
+const refreshRoute = async () => {
+  const pk = c.value?.publickey
+  if (!pk) return
+  const r = await threads.routeOf(pk).catch(() => 'offline')
+  if (c.value?.publickey === pk) route.value = r
+}
+watch(() => [c.value?.publickey, connection.routeTick, online.value, connection.isConnected], refreshRoute, { immediate: true })
+const routeTimer = setInterval(refreshRoute, 5000)
+onUnmounted(() => clearInterval(routeTimer))
+const routeLimit = computed(() => LIMITS[route.value] == null ? t.value.conv.route.noLimit : t.value.conv.route.upTo.replace('{size}', humanSize(LIMITS[route.value])))
 
 const stars = (val) => {
   if (val == null) return ''
@@ -53,34 +74,45 @@ const send = async () => {
   scrollDown()
 }
 
-const pickImage = () => { imageError.value = ''; fileInput.value?.click() }
+const pickFile = () => { fileError.value = ''; fileNotice.value = ''; fileInput.value?.click() }
 
-// El texto escrito va como pie de foto. La imagen se reduce en el aparato antes de salir.
-const onImagePicked = async (ev) => {
+// El archivo sale TAL CUAL; el texto escrito va como pie. Si no cabe por el camino de ahora,
+// se dice antes de mandarlo, con el tope de ese camino, y queda esperando al que le sirve.
+const onFilePicked = async (ev) => {
   const file = ev.target.files?.[0]
   ev.target.value = ''
   if (!file || !c.value) return
-  sendingImage.value = true
-  imageError.value = ''
+  sendingFile.value = true
+  fileError.value = ''
+  fileNotice.value = ''
+  await refreshRoute()
+  if (!fitsRoute(file.size, route.value)) {
+    const n = t.value.conv.notice
+    fileNotice.value = (route.value === 'proxy' ? n.proxy : n.offline)
+      .replace('{size}', humanSize(file.size))
+      .replace('{limit}', humanSize(LIMITS[route.value]))
+  }
   try {
-    const caption = text.value
-    await threads.sendImage(c.value.publickey, file, caption)
+    await threads.sendFile(c.value.publickey, file, text.value)
     text.value = ''
     scrollDown()
   } catch (e) {
-    console.warn('[messenger] image not sent:', e?.code || '', e?.message)
-    imageError.value = t.value.conv.imageErrors[e?.code] || t.value.conv.imageErrors.other
+    console.warn('[messenger] file not sent:', e?.code || '', e?.message)
+    fileError.value = t.value.conv.fileError
   } finally {
-    sendingImage.value = false
+    sendingFile.value = false
   }
 }
+
+const isInline = (item) => INLINE_IMAGE.test(item.file?.mime || '')
+const fileIcon = (mime) => /^image\//.test(mime) ? '🖼' : /^video\//.test(mime) ? '🎞' : /^audio\//.test(mime) ? '🎵' : /pdf$/.test(mime) ? '📕' : '📄'
 
 const scrollDown = () => nextTick(() => {
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
 })
 
 watch(() => threads.activeThread.length, scrollDown)
-watch(() => threads.activePubkey, (pk) => { threads.loadImages(pk); scrollDown() }, { immediate: true })
+watch(() => threads.activePubkey, (pk) => { threads.loadFiles(pk); scrollDown() }, { immediate: true })
 
 // Los separadores de día son texto visible: siguen el idioma de la app.
 const fmtTime = (ts) => new Date(ts).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
@@ -131,6 +163,13 @@ const grouped = computed(() => {
           <span :class="['status-text', online ? 'on' : 'off']">
             {{ online ? t.conv.online : t.conv.offline }}
           </span>
+          <span
+            :class="['route', 'route-' + route]" data-testid="route" :data-route="route"
+            :title="t.conv.route[route].label + ' · ' + routeLimit"
+          >
+            <span class="route-icon" aria-hidden="true">{{ t.conv.route[route].icon }}</span>
+            {{ t.conv.route[route].label }} · {{ routeLimit }}
+          </span>
         </div>
       </div>
       <button class="rate-btn" data-testid="rate-contact" @click="emit('rate', c.publickey)" :title="t.conv.rate">★</button>
@@ -152,18 +191,33 @@ const grouped = computed(() => {
           </div>
           <div v-else :class="['msg', item.dir]" :data-testid="'msg-' + item.dir">
             <div class="bubble">
-              <template v-if="item.image">
-                <button
-                  v-if="threads.images[item.id]"
-                  type="button" class="photo" data-testid="msg-image"
-                  :aria-label="t.conv.photo"
-                  @click="viewing = threads.images[item.id]"
-                >
-                  <img :src="threads.images[item.id]" :width="item.image.w || undefined" :height="item.image.h || undefined" alt="" />
-                </button>
-                <div v-else class="photo-missing" data-testid="msg-image-missing">📷 {{ t.conv.photo }}</div>
+              <template v-if="item.file">
+                <template v-if="isInline(item) && threads.files[item.id]">
+                  <button
+                    type="button" class="photo" data-testid="msg-image"
+                    :aria-label="item.file.name"
+                    @click="viewing = threads.files[item.id]"
+                  >
+                    <img :src="threads.files[item.id]" :width="item.file.w || undefined" :height="item.file.h || undefined" alt="" />
+                  </button>
+                </template>
+                <div v-else class="file-chip" data-testid="msg-file">
+                  <span class="file-icon" aria-hidden="true">{{ fileIcon(item.file.mime) }}</span>
+                  <span class="file-meta">
+                    <span class="file-name" data-testid="msg-file-name">{{ item.file.name }}</span>
+                    <span class="file-size">{{ humanSize(item.file.size || 0) }}</span>
+                  </span>
+                  <button
+                    type="button" class="file-dl" data-testid="msg-file-download"
+                    :disabled="!threads.files[item.id]"
+                    :title="threads.files[item.id] ? t.conv.download : t.conv.fileMissing"
+                    :aria-label="t.conv.download"
+                    @click="downloadFile(threads.files[item.id], item.file.name)"
+                  >⬇</button>
+                </div>
               </template>
               <div v-if="item.text" class="text" data-testid="msg-text">{{ item.text }}</div>
+              <div v-if="item.waits && item.pending" class="waits" data-testid="msg-waits" :data-waits="item.waits">{{ t.conv.waits[item.waits] }}</div>
               <div class="meta">
                 <span class="time">{{ fmtTime(item.ts) }}</span>
                 <span v-if="item.dir === 'out'" class="check">{{ item.pending ? '⌛' : '✓' }}</span>
@@ -175,15 +229,16 @@ const grouped = computed(() => {
     </div>
 
     <p v-if="noDevices" class="no-devices" role="status" data-testid="no-devices">{{ t.conv.noDevices }}</p>
-    <p v-if="imageError" class="image-error" role="alert" data-testid="image-error">{{ imageError }}</p>
+    <p v-if="fileNotice" class="file-notice" role="status" data-testid="file-notice">{{ fileNotice }}</p>
+    <p v-if="fileError" class="image-error" role="alert" data-testid="file-error">{{ fileError }}</p>
     <form class="composer" @submit.prevent="send">
-      <input ref="fileInput" type="file" accept="image/*" hidden data-testid="image-input" @change="onImagePicked" />
+      <input ref="fileInput" type="file" hidden data-testid="file-input" @change="onFilePicked" />
       <button
-        type="button" class="clip" data-testid="attach-image"
-        :disabled="noDevices || sendingImage"
-        :title="t.conv.attach" :aria-label="t.conv.attach"
-        @click="pickImage"
-      >{{ sendingImage ? '⌛' : '📎' }}</button>
+        type="button" class="clip" data-testid="attach-file"
+        :disabled="noDevices || sendingFile"
+        :title="t.conv.attach + ' · ' + routeLimit" :aria-label="t.conv.attach"
+        @click="pickFile"
+      >{{ sendingFile ? '⌛' : '📎' }}</button>
       <textarea
         v-model="text"
         :disabled="noDevices"
@@ -270,10 +325,11 @@ const grouped = computed(() => {
 .stars.derived { color: var(--derived); }
 
 .sub {
-  display: flex; gap: 8px; align-items: center;
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center;
   font-size: 12px;
   margin-top: 1px;
 }
+.status-text { white-space: nowrap; }
 .status-text.on  { color: var(--online); font-weight: 500; }
 .status-text.off { color: var(--muted); font-style: italic; }
 .rate-btn {
@@ -364,6 +420,31 @@ const grouped = computed(() => {
   width: auto; height: auto; object-fit: cover;
 }
 .photo-missing { font-size: 13px; opacity: 0.7; padding: 4px 0; }
+.waits { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+.file-chip {
+  display: flex; align-items: center; gap: 10px; min-width: 200px; max-width: min(320px, 70vw);
+  padding: 6px 4px 8px;
+}
+.file-icon { font-size: 26px; }
+.file-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.file-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size { font-size: 11.5px; opacity: 0.75; }
+.file-dl {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid currentColor;
+  background: transparent; color: inherit; cursor: pointer; flex-shrink: 0;
+}
+.file-dl:disabled { opacity: 0.35; cursor: not-allowed; }
+.file-notice { margin: 0; padding: 8px 20px; font-size: 12px; color: var(--muted); }
+.route {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+}
+.route-direct, .route-socket, .route-turn, .route-webrtc { color: var(--dt-accent); border-color: color-mix(in srgb, var(--dt-accent) 45%, transparent); }
+.route-icon { font-size: 12px; }
+@media (max-width: 700px) {
+  .route { margin-left: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+}
 .image-error { margin: 0; padding: 8px 20px; font-size: 12px; color: var(--dt-danger, #b3261e); }
 .clip:disabled { opacity: 0.4; cursor: not-allowed; }
 .viewer {

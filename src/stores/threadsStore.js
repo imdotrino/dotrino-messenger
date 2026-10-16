@@ -11,14 +11,19 @@ import { getReputation } from '../services/reputation'
 import { sanitizeMessage, sanitizeNickname } from '../utils/sanitize'
 import { key as accountKey } from '../services/account'
 import { MINE as MI_VERSION, revisar } from '../services/compat'
-import { prepareImage, validIncomingImage } from '../utils/image'
+import { readFile, validIncomingFile } from '../utils/file'
 
-// LOS BYTES DE LAS IMÁGENES van en su propio hilo del almacén (`img:<contacto>`), una
-// entrada por imagen con el mismo id que su mensaje. En el hilo de la conversación queda
-// solo la descripción ({ mime, w, h }): ese hilo se copia entero a localStorage en cada
-// cambio, y unas fotos lo llenarían en minutos.
-const IMG_PREFIX = 'img:'
-const imgKey = (pubkey) => IMG_PREFIX + pubkey
+// LOS BYTES DE LOS ARCHIVOS van en su propio hilo del almacén (`file:<contacto>`). En el
+// hilo de la conversación queda solo su descripción ({ name, mime, size, w, h }): ese hilo
+// se copia entero a localStorage en cada cambio, y unos archivos lo llenarían en minutos.
+//
+// Y cada archivo va en TROZOS de 384 KB (`<id>#<i>`): el respaldo en la bóveda no admite
+// entradas de más de 550 KB, y un archivo entero se quedaría solo en este navegador.
+const FILE_PREFIX = 'file:'
+const fileKey = (pubkey) => FILE_PREFIX + pubkey
+const FILE_PIECE = 384 * 1024
+// Del mejor camino al peor, para decir por dónde va un contacto con varios aparatos.
+const ROUTE_ORDER = ['socket', 'direct', 'turn', 'webrtc', 'proxy', 'offline']
 
 // Contactos a los que ya contestamos el saludo esta sesión (por token). Evita la
 // "tormenta de HELLO": un saludo de respuesta es a su vez un saludo, y dos contactos en
@@ -82,7 +87,7 @@ function mergeThreads (local, remote) {
 }
 
 /**
- * Thread entry shape: { id, dir: 'in'|'out', text, ts, pending?: boolean, image?: { mime, w, h } }
+ * Thread entry shape: { id, dir: 'in'|'out', text, ts, pending?: boolean, file?: { name, mime, size, w, h }, waits?: 'online'|'direct' }
  * Threads are keyed by contact pubkey.
  *
  * WIRE PROTOCOL (protocol 2). Every message is an object SEALED by the transport pillar
@@ -93,8 +98,9 @@ function mergeThreads (local, remote) {
  *                                            requests inbox, NEVER to a chat
  *   CONTACT_ACCEPT  { nickname, v, card? }   "accepted" — only counts if I asked first
  *   HELLO           { nickname, v, card? }   presence between contacts (token + nickname)
- *   DM              { text, ts, mid, image? } a chat message — only from a contact. `image` is
- *                                            { mime, data (base64), w, h }; `text` is its caption
+ *   DM              { text, ts, mid, file? }  a chat message — only from a contact. `file` is
+ *                                            { name, mime, data (base64), w, h }, sent as is;
+ *                                            `text` is its caption
  *   DM_ACK          { id }
  *   RATING_QUERY    { queryId, subject }
  *   RATING_REPLY    { queryId, subject, mine, endorsements }
@@ -123,9 +129,9 @@ export const useThreadsStore = defineStore('threads', () => {
   // Último DM entrante decodificado, para que App.vue muestre la notificación
   // centrada cuando llegue uno nuevo.
   const lastIncomingDM = ref(null)
-  // id de mensaje → data URI de su imagen, para pintarla. Se llena al leer el almacén.
-  const images = ref(/** @type {Record<string, string>} */ ({}))
-  const imagesLoaded = new Set()
+  // id de mensaje → data URI de su archivo. Se llena al leer el almacén.
+  const files = ref(/** @type {Record<string, string>} */ ({}))
+  const filesLoaded = new Set()
   // pubkey -> 'incompatible' | 'unknown'. Lo que dijo su saludo (§14).
   const peerCompat = ref(/** @type {Record<string, string>} */ ({}))
 
@@ -159,7 +165,7 @@ export const useThreadsStore = defineStore('threads', () => {
     const summaries = await store.getThreadSummaries()
     const next = {}
     for (const k of Object.keys(summaries)) {
-      if (k.startsWith(IMG_PREFIX)) continue // bytes de imágenes: se leen al pintarlas
+      if (k.startsWith(FILE_PREFIX)) continue // bytes de archivos: se leen al abrir la conversación
       next[k] = await store.listThread(k)
     }
     // SE FUSIONA, NO SE PISA. Antes esto era `threads.value = next` + guardar: si el
@@ -226,7 +232,7 @@ export const useThreadsStore = defineStore('threads', () => {
       localStorage.setItem(ACTIVE_KEY, pubkey)
       sendHelloTo(pubkey)
       markThreadRead(pubkey).catch(() => {})
-      loadImages(pubkey).catch(() => {})
+      loadFiles(pubkey).catch(() => {})
     } else {
       localStorage.removeItem(ACTIVE_KEY)
     }
@@ -292,54 +298,104 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   /**
-   * Manda una imagen (con `caption` opcional). Se reduce y se recomprime aquí antes de
-   * salir. Lanza con `code` (`not-image`, `image-too-big`) si no se puede mandar.
+   * Manda un archivo TAL CUAL (con `caption` opcional). Si no cabe por el camino de ahora,
+   * queda pendiente: `waits: 'online'` hasta que el contacto se conecte, `'direct'` hasta que
+   * haya canal directo. Devuelve la entrada.
    */
-  const sendImage = async (pubkey, file, caption = '') => {
+  const sendFile = async (pubkey, file, caption = '') => {
     const contact = contacts.findByPubkey(pubkey)
     if (!contact) throw new Error('Unknown contact')
-    const img = await prepareImage(file)
+    const f = await readFile(file)
     const text = sanitizeMessage(caption || '')
-    const entry = { id: crypto.randomUUID(), dir: 'out', text, ts: Date.now(), pending: true, image: { mime: img.mime, w: img.w, h: img.h } }
-    await saveImage(pubkey, entry.id, img)
+    const entry = { id: crypto.randomUUID(), dir: 'out', text, ts: Date.now(), pending: true, file: { name: f.name, mime: f.mime, size: f.size, w: f.w, h: f.h } }
+    await saveFile(pubkey, entry.id, f)
     append(pubkey, entry)
-    await deliver({ pubkey, entryId: entry.id, text, ts: entry.ts, image: img })
+    await deliver({ pubkey, entryId: entry.id, text, ts: entry.ts, file: f })
+    return entry
   }
 
-  /** Guarda los bytes de una imagen en su hilo aparte y la deja lista para pintarse. */
-  const saveImage = async (pubkey, id, img) => {
-    images.value = { ...images.value, [id]: `data:${img.mime};base64,${img.data}` }
+  /** Guarda los bytes de un archivo en su hilo aparte. */
+  const saveFile = async (pubkey, id, f) => {
+    files.value = { ...files.value, [id]: `data:${f.mime};base64,${f.data}` }
     const store = await getStore()
     if (!store) return
-    try { await store.appendMessage(imgKey(pubkey), { id, ts: Date.now(), mime: img.mime, data: img.data, w: img.w, h: img.h }) }
-    catch (e) { console.warn('[messenger] could not store the image:', e?.code || '', e?.message) }
-  }
-
-  /** Lee del almacén las imágenes de una conversación (una vez por sesión). */
-  const loadImages = async (pubkey) => {
-    if (!pubkey || imagesLoaded.has(pubkey)) return
-    const store = await getStore()
-    if (!store) return
-    imagesLoaded.add(pubkey)
+    const n = Math.max(1, Math.ceil(f.data.length / FILE_PIECE))
     try {
-      const list = await store.listThread(imgKey(pubkey))
-      const next = { ...images.value }
-      for (const e of list || []) if (e?.id && e.data && e.mime) next[e.id] = `data:${e.mime};base64,${e.data}`
-      images.value = next
+      for (let i = 0; i < n; i++) {
+        await store.appendMessage(fileKey(pubkey), {
+          id: `${id}#${i}`, msg: id, i, n, ts: Date.now(), mime: f.mime,
+          data: f.data.slice(i * FILE_PIECE, (i + 1) * FILE_PIECE)
+        })
+      }
+    } catch (e) { console.warn('[messenger] could not store the file:', e?.code || '', e?.message) }
+  }
+
+  /** Lee del almacén los archivos de una conversación (una vez por sesión). */
+  const loadFiles = async (pubkey) => {
+    if (!pubkey || filesLoaded.has(pubkey)) return
+    const store = await getStore()
+    if (!store) return
+    filesLoaded.add(pubkey)
+    try {
+      const list = await store.listThread(fileKey(pubkey))
+      const porArchivo = new Map()
+      for (const e of list || []) {
+        if (!e?.msg || typeof e.data !== 'string' || !e.mime || !Number.isInteger(e.i) || !Number.isInteger(e.n)) continue
+        if (!porArchivo.has(e.msg)) porArchivo.set(e.msg, { mime: e.mime, n: e.n, parts: [] })
+        porArchivo.get(e.msg).parts[e.i] = e.data
+      }
+      const next = { ...files.value }
+      for (const [id, f] of porArchivo) {
+        const parts = f.parts.slice(0, f.n)
+        // Un archivo al que le falta un trozo (todavía llegando de otro aparato) no se enseña a medias.
+        if (parts.length === f.n && parts.every((p) => typeof p === 'string')) next[id] = `data:${f.mime};base64,${parts.join('')}`
+      }
+      files.value = next
     } catch (e) {
-      imagesLoaded.delete(pubkey)
-      console.warn('[messenger] could not read the images:', e?.code || '', e?.message)
+      filesLoaded.delete(pubkey)
+      console.warn('[messenger] could not read the files:', e?.code || '', e?.message)
     }
+  }
+
+  /**
+   * POR DÓNDE VA un contacto ahora, para enseñarlo con su tope: el mejor camino entre sus
+   * aparatos conectados, u `offline` si no hay ninguno (lo suyo espera en el proxio).
+   */
+  const routeOf = async (pubkey) => {
+    const c = contacts.findByPubkey(pubkey)
+    if (!c || !contacts.isOnline(c.publickey)) return 'offline'
+    const recipients = contacts.recipientsOf(c.publickey)
+    const tokens = new Set()
+    for (const r of recipients) if (deviceTokens.get(r.pubkey)) tokens.add(deviceTokens.get(r.pubkey))
+    const live = contacts.liveTokenFor(c.publickey)
+    if (live) tokens.add(live)
+    let best = 'offline'
+    for (const t of tokens) {
+      const r = await connection.wsProxyClient.routeTo(t)
+      if (ROUTE_ORDER.indexOf(r) < ROUTE_ORDER.indexOf(best)) best = r
+    }
+    return best
+  }
+
+  /** Un token que murió (la otra punta se fue) deja de usarse para escribirle. */
+  const forgetToken = (token) => {
+    for (const [pk, t] of deviceTokens) if (t === token) deviceTokens.delete(pk)
   }
 
   /** Sends one outgoing DM; if it cannot leave now, it stays in the outbox. */
   const deliver = async (item) => {
     try {
-      await sendToContact(item.pubkey, { type: 'DM', text: item.text, ts: item.ts, mid: item.entryId, ...(item.image ? { image: item.image } : {}) })
-      await updateEntry(item.pubkey, item.entryId, { pending: false })
+      await sendToContact(item.pubkey, { type: 'DM', text: item.text, ts: item.ts, mid: item.entryId, ...(item.file ? { file: item.file } : {}) })
+      // Un archivo se da por entregado con el acuse del otro lado: va en partes, y si la otra
+      // punta se va a mitad, no llega entero aunque aquí todo saliera.
+      await updateEntry(item.pubkey, item.entryId, item.file ? { waits: null } : { pending: false })
       return true
     } catch (e) {
       console.warn('[messenger] DM could not be sent, will retry:', e?.code || '', e?.message)
+      // No cabe por el camino de ahora: sale cuando el contacto se conecte, o cuando haya
+      // canal directo. Se dice en la burbuja, no se queda en un ⌛ mudo.
+      if (e?.code === 'too-big-for-queue') updateEntry(item.pubkey, item.entryId, { waits: 'online' })
+      if (e?.code === 'too-big-for-relay' || e?.code === 'direct-lost') updateEntry(item.pubkey, item.entryId, { waits: 'direct' })
       if (!outbox.value.some(x => x.entryId === item.entryId)) outbox.value.push(item)
       return false
     }
@@ -556,9 +612,9 @@ export const useThreadsStore = defineStore('threads', () => {
     const store = await getStore()
     if (!store) return
     for (const e of arr) await store.appendMessage(to, e)
-    const imgs = await store.listThread(imgKey(from)).catch(() => [])
-    for (const e of imgs || []) await store.appendMessage(imgKey(to), e)
-    imagesLoaded.delete(to)
+    const fs = await store.listThread(fileKey(from)).catch(() => [])
+    for (const e of fs || []) await store.appendMessage(fileKey(to), e)
+    filesLoaded.delete(to)
   }
 
   const handleContactRequest = async (fromToken, who, payload) => {
@@ -653,11 +709,11 @@ export const useThreadsStore = defineStore('threads', () => {
   const handleDM = async (fromToken, contact, payload, meta = {}) => {
     if (typeof payload.text !== 'string') return
     const cleanText = sanitizeMessage(payload.text)
-    // Una imagen que no pasa la validación se descarta entera: el texto solo sería un pie
-    // de foto sin foto.
-    const image = payload.image === undefined ? null : validIncomingImage(payload.image)
-    if (payload.image !== undefined && !image) {
-      console.warn('[messenger] an incoming image was not valid: dropped')
+    // Un archivo que no pasa la validación se descarta entero: el texto solo sería un pie
+    // sin lo que acompaña.
+    const file = payload.file === undefined ? null : validIncomingFile(payload.file)
+    if (payload.file !== undefined && !file) {
+      console.warn('[messenger] an incoming file was not valid: dropped')
       return
     }
     const mid = typeof payload.mid === 'string' ? payload.mid : crypto.randomUUID()
@@ -669,14 +725,14 @@ export const useThreadsStore = defineStore('threads', () => {
       (typeof document === 'undefined' || document.visibilityState === 'visible')
     // El mismo mensaje puede llegar dos veces (cola offline + en vivo): una vez basta.
     if (!(threads.value[pubkey] || []).some(e => e.id === mid)) {
-      if (image) await saveImage(pubkey, mid, image)
-      append(pubkey, { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(image ? { image: { mime: image.mime, w: image.w, h: image.h } } : {}), ...(leido ? { _read: true } : {}) })
+      if (file) await saveFile(pubkey, mid, file)
+      append(pubkey, { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(file ? { file: { name: file.name, mime: file.mime, size: file.size, w: file.w, h: file.h } } : {}), ...(leido ? { _read: true } : {}) })
       notify('message', {
         id: mid,
         fromPubkey: pubkey,
         fromNickname: contact.nickname || pubkey.slice(0, 8),
         text: cleanText,
-        image: !!image,
+        file: file ? file.name : null,
         ts
       })
     }
@@ -776,8 +832,8 @@ export const useThreadsStore = defineStore('threads', () => {
 
   return {
     threads, activePubkey, activeThread, activeContact, outbox, lastIncomingDM, peerCompat,
-    images, loadImages,
-    setActive, sendDM, sendImage, flushOutbox, markThreadRead,
+    files, loadFiles, routeOf, forgetToken,
+    setActive, sendDM, sendFile, flushOutbox, markThreadRead,
     handleIncoming, sendHelloTo, sendContactRequest,
     askRatingsAbout, load,
     requests, acceptRequest, dismissRequest

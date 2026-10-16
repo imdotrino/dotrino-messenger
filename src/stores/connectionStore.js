@@ -65,6 +65,9 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   const myPublickey = ref(null)
+  // Sube cada vez que el camino hacia alguien puede haber cambiado (canal directo abierto o
+  // cerrado, un aparato que se fue). La conversación lo mira para volver a preguntar.
+  const routeTick = ref(0)
   const queuedDelivered = ref(0)
 
   const connect = async () => {
@@ -341,11 +344,22 @@ export const useConnectionStore = defineStore('connection', () => {
     })
     wsProxyClient.on('peer_disconnected', (peerToken) => {
       import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
+      import('./threadsStore.js').then(m => m.useThreadsStore().forgetToken(peerToken)).catch(() => {})
+      routeTick.value++
     })
+    // El camino cambió (se abrió o se cerró el canal directo): la conversación lo enseña, y
+    // lo que esperaba canal directo por ser grande puede salir ahora.
+    wsProxyClient.on('webrtc_open', () => {
+      routeTick.value++
+      import('./threadsStore.js').then(m => m.useThreadsStore().flushOutbox()).catch(() => {})
+    })
+    wsProxyClient.on('webrtc_close', () => { routeTick.value++ })
     // El pilar mandó a un token que ya no existe (la otra punta reinició la app) y lo reenvió
     // por su pubkey: ese token se olvida, o los siguientes mensajes volverían a ir ahí.
     wsProxyClient.on('token_gone', (peerToken) => {
       import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
+      import('./threadsStore.js').then(m => m.useThreadsStore().forgetToken(peerToken)).catch(() => {})
+      routeTick.value++
     })
     // El client se rindió de reconectar al proxio actual → intentar otro nodo.
     wsProxyClient.on('reconnect_failed', () => { attemptFailover() })
@@ -354,7 +368,7 @@ export const useConnectionStore = defineStore('connection', () => {
   return {
     token, pairingCode, refreshPairingCode, redeemPairingCode, waitConnected,
     isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
-    myPublickey, queuedDelivered,
+    myPublickey, queuedDelivered, routeTick,
     connect, disconnect, sendSealedTo, sendSealed, encPubOf, pubkeyOfToken, whoIs, setNickname, setPresenceChannel, wsProxyClient,
     KNOWN_PROXIES, setProxyUrl,
     identifyWithVault

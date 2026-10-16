@@ -131,12 +131,28 @@ export const messages = {
       emptySmall: 'Saluda y empieza la conversación 👋',
       today: 'Hoy',
       yesterday: 'Ayer',
-      attach: 'Mandar una foto',
+      attach: 'Mandar un archivo',
       photo: 'Foto',
-      imageErrors: {
-        'not-image': 'Ese archivo no es una imagen que se pueda abrir.',
-        'image-too-big': 'La imagen es demasiado grande para mandarla.',
-        other: 'No se pudo mandar la imagen. Inténtalo de nuevo.'
+      download: 'Descargar',
+      fileMissing: 'Este archivo no está en este aparato',
+      fileError: 'No se pudo mandar el archivo. Inténtalo de nuevo.',
+      waits: {
+        online: 'Es grande: sale cuando tu contacto se conecte',
+        direct: 'Es grande: sale cuando tengan conexión directa'
+      },
+      notice: {
+        offline: 'Este archivo pesa {size}. Con tu contacto desconectado solo esperan archivos de hasta {limit}: saldrá cuando se conecte.',
+        proxy: 'Este archivo pesa {size}. Por el servidor solo pasan archivos de hasta {limit}: saldrá cuando tengan conexión directa.'
+      },
+      route: {
+        noLimit: 'sin límite',
+        upTo: 'hasta {size}',
+        socket: { icon: '🖥', label: 'En este equipo' },
+        direct: { icon: '⚡', label: 'Directa' },
+        webrtc: { icon: '⚡', label: 'Directa' },
+        turn: { icon: '🔁', label: 'Directa, con relevo' },
+        proxy: { icon: '☁', label: 'Por el servidor' },
+        offline: { icon: '⏳', label: 'Desconectado' }
       },
       placeholder: 'Escribe un mensaje…',
       send: 'Enviar',
@@ -287,12 +303,28 @@ export const messages = {
       emptySmall: 'Say hi and start the conversation 👋',
       today: 'Today',
       yesterday: 'Yesterday',
-      attach: 'Send a photo',
+      attach: 'Send a file',
       photo: 'Photo',
-      imageErrors: {
-        'not-image': 'That file is not an image that can be opened.',
-        'image-too-big': 'The image is too big to send.',
-        other: 'The image could not be sent. Try again.'
+      download: 'Download',
+      fileMissing: 'This file is not on this device',
+      fileError: 'The file could not be sent. Try again.',
+      waits: {
+        online: 'It is large: it goes when your contact comes online',
+        direct: 'It is large: it goes when you have a direct connection'
+      },
+      notice: {
+        offline: 'This file is {size}. While your contact is offline only files up to {limit} can wait: it will go when they come online.',
+        proxy: 'This file is {size}. Through the server only files up to {limit} go: it will go when you have a direct connection.'
+      },
+      route: {
+        noLimit: 'no limit',
+        upTo: 'up to {size}',
+        socket: { icon: '🖥', label: 'On this computer' },
+        direct: { icon: '⚡', label: 'Direct' },
+        webrtc: { icon: '⚡', label: 'Direct' },
+        turn: { icon: '🔁', label: 'Direct, through a relay' },
+        proxy: { icon: '☁', label: 'Through the server' },
+        offline: { icon: '⏳', label: 'Offline' }
       },
       placeholder: 'Write a message…',
       send: 'Send',
