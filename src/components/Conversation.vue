@@ -20,6 +20,11 @@ const emit = defineEmits(['back', 'rate'])
 
 const text = ref('')
 const scroller = ref(null)
+const fileInput = ref(null)
+const sendingImage = ref(false)
+const imageError = ref('')
+// La foto que se abre a pantalla completa (data URI), o null.
+const viewing = ref(null)
 
 const c = computed(() => threads.activeContact)
 const online = computed(() => c.value && contacts.isOnline(c.value.publickey))
@@ -48,12 +53,34 @@ const send = async () => {
   scrollDown()
 }
 
+const pickImage = () => { imageError.value = ''; fileInput.value?.click() }
+
+// El texto escrito va como pie de foto. La imagen se reduce en el aparato antes de salir.
+const onImagePicked = async (ev) => {
+  const file = ev.target.files?.[0]
+  ev.target.value = ''
+  if (!file || !c.value) return
+  sendingImage.value = true
+  imageError.value = ''
+  try {
+    const caption = text.value
+    await threads.sendImage(c.value.publickey, file, caption)
+    text.value = ''
+    scrollDown()
+  } catch (e) {
+    console.warn('[messenger] image not sent:', e?.code || '', e?.message)
+    imageError.value = t.value.conv.imageErrors[e?.code] || t.value.conv.imageErrors.other
+  } finally {
+    sendingImage.value = false
+  }
+}
+
 const scrollDown = () => nextTick(() => {
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
 })
 
 watch(() => threads.activeThread.length, scrollDown)
-watch(() => threads.activePubkey, scrollDown, { immediate: true })
+watch(() => threads.activePubkey, (pk) => { threads.loadImages(pk); scrollDown() }, { immediate: true })
 
 // Los separadores de día son texto visible: siguen el idioma de la app.
 const fmtTime = (ts) => new Date(ts).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
@@ -125,7 +152,18 @@ const grouped = computed(() => {
           </div>
           <div v-else :class="['msg', item.dir]" :data-testid="'msg-' + item.dir">
             <div class="bubble">
-              <div class="text" data-testid="msg-text">{{ item.text }}</div>
+              <template v-if="item.image">
+                <button
+                  v-if="threads.images[item.id]"
+                  type="button" class="photo" data-testid="msg-image"
+                  :aria-label="t.conv.photo"
+                  @click="viewing = threads.images[item.id]"
+                >
+                  <img :src="threads.images[item.id]" :width="item.image.w || undefined" :height="item.image.h || undefined" alt="" />
+                </button>
+                <div v-else class="photo-missing" data-testid="msg-image-missing">📷 {{ t.conv.photo }}</div>
+              </template>
+              <div v-if="item.text" class="text" data-testid="msg-text">{{ item.text }}</div>
               <div class="meta">
                 <span class="time">{{ fmtTime(item.ts) }}</span>
                 <span v-if="item.dir === 'out'" class="check">{{ item.pending ? '⌛' : '✓' }}</span>
@@ -137,8 +175,15 @@ const grouped = computed(() => {
     </div>
 
     <p v-if="noDevices" class="no-devices" role="status" data-testid="no-devices">{{ t.conv.noDevices }}</p>
+    <p v-if="imageError" class="image-error" role="alert" data-testid="image-error">{{ imageError }}</p>
     <form class="composer" @submit.prevent="send">
-      <button type="button" class="clip" :title="t.conv.attach">📎</button>
+      <input ref="fileInput" type="file" accept="image/*" hidden data-testid="image-input" @change="onImagePicked" />
+      <button
+        type="button" class="clip" data-testid="attach-image"
+        :disabled="noDevices || sendingImage"
+        :title="t.conv.attach" :aria-label="t.conv.attach"
+        @click="pickImage"
+      >{{ sendingImage ? '⌛' : '📎' }}</button>
       <textarea
         v-model="text"
         :disabled="noDevices"
@@ -151,6 +196,10 @@ const grouped = computed(() => {
         <span>➤</span>
       </button>
     </form>
+
+    <div v-if="viewing" class="viewer" data-testid="image-viewer" @click="viewing = null">
+      <img :src="viewing" alt="" />
+    </div>
   </div>
 </template>
 
@@ -304,6 +353,27 @@ const grouped = computed(() => {
 .msg.out .meta { color: color-mix(in srgb, var(--dt-accent-ink) 85%, transparent); }
 .msg.in  .meta { color: var(--muted); }
 .check { font-size: 12px; }
+
+/* ----- Fotos ----- */
+.photo {
+  display: block; padding: 0; border: 0; background: none; cursor: zoom-in;
+  margin: -2px -4px 4px; border-radius: 12px; overflow: hidden;
+}
+.photo img {
+  display: block; max-width: min(280px, 60vw); max-height: 320px;
+  width: auto; height: auto; object-fit: cover;
+}
+.photo-missing { font-size: 13px; opacity: 0.7; padding: 4px 0; }
+.image-error { margin: 0; padding: 8px 20px; font-size: 12px; color: var(--dt-danger, #b3261e); }
+.clip:disabled { opacity: 0.4; cursor: not-allowed; }
+.viewer {
+  position: fixed; inset: 0; z-index: 50;
+  background: color-mix(in srgb, #000 88%, transparent);
+  display: flex; align-items: center; justify-content: center;
+  padding: env(safe-area-inset-top, 0) 12px env(safe-area-inset-bottom, 0);
+  cursor: zoom-out;
+}
+.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 /* ----- Composer ----- */
 .composer {

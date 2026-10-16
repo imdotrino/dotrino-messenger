@@ -131,7 +131,13 @@ export const messages = {
       emptySmall: 'Saluda y empieza la conversación 👋',
       today: 'Hoy',
       yesterday: 'Ayer',
-      attach: 'Adjuntar (próximamente)',
+      attach: 'Mandar una foto',
+      photo: 'Foto',
+      imageErrors: {
+        'not-image': 'Ese archivo no es una imagen que se pueda abrir.',
+        'image-too-big': 'La imagen es demasiado grande para mandarla.',
+        other: 'No se pudo mandar la imagen. Inténtalo de nuevo.'
+      },
       placeholder: 'Escribe un mensaje…',
       send: 'Enviar',
       noDevices: 'Dotrino te escribirá aquí cuando responda a lo que pediste por correo. Después podrás contestarle.',
@@ -281,7 +287,13 @@ export const messages = {
       emptySmall: 'Say hi and start the conversation 👋',
       today: 'Today',
       yesterday: 'Yesterday',
-      attach: 'Attach (coming soon)',
+      attach: 'Send a photo',
+      photo: 'Photo',
+      imageErrors: {
+        'not-image': 'That file is not an image that can be opened.',
+        'image-too-big': 'The image is too big to send.',
+        other: 'The image could not be sent. Try again.'
+      },
       placeholder: 'Write a message…',
       send: 'Send',
       noDevices: 'Dotrino will write to you here when it answers what you asked for by email. Then you can reply.',

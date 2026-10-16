@@ -1,7 +1,7 @@
 {
   "name": "dotrino-messenger",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "dotrino": {
     "platforms": [
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@dotrino/compat": "0.4.0",
+    "@dotrino/content-client": "0.2.4",
     "@dotrino/identity": "0.116.0",
     "@dotrino/install": "0.3.3",
     "@dotrino/nav": "0.3.0",

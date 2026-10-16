@@ -123,6 +123,58 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
 })
 
 /**
+ * FOTOS: una imagen grande se reduce en el aparato, sale sellada como cualquier mensaje y
+ * la otra punta la ve, con su pie de foto. Y no se pierde al recargar (va en el almacén).
+ */
+test('un amigo le manda una foto al otro', async () => {
+  test.setTimeout(180_000)
+  const browser = await chromium.launch()
+  const ana = await entrar(browser, `Ana${marca}F`)
+  const beto = await entrar(browser, `Beto${marca}F`)
+  try {
+    const codigoAna = await codigoDe(ana)
+    await beto.page.getByTestId('add-contact').click()
+    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('send-hello').click()
+    await aceptarSolicitud(ana)
+    await abrirConversacion(ana)
+    await abrirConversacion(beto)
+
+    // Una foto de 3000×2000 con ruido: pesa varios MB en PNG, así que tiene que reducirse.
+    const png = await beto.page.evaluate(() => {
+      const c = document.createElement('canvas')
+      c.width = 3000; c.height = 2000
+      const ctx = c.getContext('2d')
+      const img = ctx.createImageData(c.width, c.height)
+      for (let i = 0; i < img.data.length; i++) img.data[i] = (i * 7919) % 251
+      ctx.putImageData(img, 0, 0)
+      return c.toDataURL('image/png').split(',')[1]
+    })
+    const pie = `mira esto ${marca}`
+    await beto.page.getByTestId('composer-input').fill(pie)
+    await beto.page.getByTestId('image-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+
+    const recibida = ana.page.getByTestId('msg-in').filter({ hasText: pie })
+    await expect(recibida).toBeVisible({ timeout: ESPERA })
+    const img = recibida.getByTestId('msg-image').locator('img')
+    await expect(img).toBeVisible({ timeout: ESPERA })
+    const src = await img.getAttribute('src')
+    expect(src.startsWith('data:image/jpeg;base64,'), 'la foto llega recomprimida en JPEG').toBe(true)
+    expect(src.length * 0.75, 'la foto salió reducida').toBeLessThan(205 * 1024)
+
+    // Se ve también en quien la mandó, y sigue ahí al recargar.
+    await expect(beto.page.getByTestId('msg-out').getByTestId('msg-image')).toBeVisible({ timeout: ESPERA })
+    await ana.page.reload()
+    await abrirConversacion(ana)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: pie }).getByTestId('msg-image')).toBeVisible({ timeout: ESPERA })
+  } finally {
+    await ana.context.close().catch(() => {})
+    await beto.context.close().catch(() => {})
+    await browser.close().catch(() => {})
+  }
+})
+
+/**
  * BLOQUEAR (indicador privado de la tarjeta, aparte de las estrellas): lo que manda alguien
  * bloqueado no llega, y al desbloquear vuelve a llegar. Se bloquea DESDE LA TARJETA, como lo
  * haría una persona.

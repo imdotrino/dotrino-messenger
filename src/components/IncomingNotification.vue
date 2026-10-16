@@ -44,7 +44,7 @@ watch(() => props.dm, (next) => {
   >
     <div class="cc-incoming-card">
       <div class="cc-incoming-from">{{ dm?.fromNickname || t.incoming.newMessage }}</div>
-      <div class="cc-incoming-text">{{ dm?.request ? t.requests.defaultMsg : dm?.text }}</div>
+      <div class="cc-incoming-text">{{ dm?.request ? t.requests.defaultMsg : (dm?.text || (dm?.image ? '📷 ' + t.conv.photo : '')) }}</div>
     </div>
   </div>
 </template>
