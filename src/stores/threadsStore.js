@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, markRaw } from 'vue'
 import { samePubkey } from '@dotrino/proxy-client'
 import { useConnectionStore } from './connectionStore'
 import { useContactsStore } from './contactsStore'
@@ -11,7 +11,7 @@ import { getReputation } from '../services/reputation'
 import { sanitizeMessage, sanitizeNickname } from '../utils/sanitize'
 import { key as accountKey } from '../services/account'
 import { MINE as MI_VERSION, revisar } from '../services/compat'
-import { readFile, validIncomingFile } from '../utils/file'
+import { readFile, validIncomingFile, toBase64 } from '../utils/file'
 
 // LOS BYTES DE LOS ARCHIVOS van en su propio hilo del almacén (`file:<contacto>`). En el
 // hilo de la conversación queda solo su descripción ({ name, mime, size, w, h }): ese hilo
@@ -305,7 +305,8 @@ export const useThreadsStore = defineStore('threads', () => {
   const sendFile = async (pubkey, file, caption = '') => {
     const contact = contacts.findByPubkey(pubkey)
     if (!contact) throw new Error('Unknown contact')
-    const f = await readFile(file)
+    // markRaw: los bytes no se vuelven reactivos al pasar por el outbox.
+    const f = markRaw(await readFile(file))
     const text = sanitizeMessage(caption || '')
     const entry = { id: crypto.randomUUID(), dir: 'out', text, ts: Date.now(), pending: true, file: { name: f.name, mime: f.mime, size: f.size, w: f.w, h: f.h } }
     await saveFile(pubkey, entry.id, f)
@@ -314,17 +315,18 @@ export const useThreadsStore = defineStore('threads', () => {
     return entry
   }
 
-  /** Guarda los bytes de un archivo en su hilo aparte. */
+  /** Guarda los bytes de un archivo en su hilo aparte (en base64: el almacén guarda JSON). */
   const saveFile = async (pubkey, id, f) => {
-    files.value = { ...files.value, [id]: `data:${f.mime};base64,${f.data}` }
+    const b64 = toBase64(f.data)
+    files.value = { ...files.value, [id]: `data:${f.mime};base64,${b64}` }
     const store = await getStore()
     if (!store) return
-    const n = Math.max(1, Math.ceil(f.data.length / FILE_PIECE))
+    const n = Math.max(1, Math.ceil(b64.length / FILE_PIECE))
     try {
       for (let i = 0; i < n; i++) {
         await store.appendMessage(fileKey(pubkey), {
           id: `${id}#${i}`, msg: id, i, n, ts: Date.now(), mime: f.mime,
-          data: f.data.slice(i * FILE_PIECE, (i + 1) * FILE_PIECE)
+          data: b64.slice(i * FILE_PIECE, (i + 1) * FILE_PIECE)
         })
       }
     } catch (e) { console.warn('[messenger] could not store the file:', e?.code || '', e?.message) }
