@@ -138,7 +138,8 @@ export const messages = {
       fileError: 'No se pudo mandar el archivo. Inténtalo de nuevo.',
       waits: {
         online: 'Es grande: sale cuando tu contacto se conecte',
-        direct: 'Es grande: sale cuando tengan conexión directa'
+        direct: 'Es grande: sale cuando tengan conexión directa',
+        version: 'Tu contacto usa una versión que no recibe archivos: sale cuando la actualice'
       },
       notice: {
         offline: 'Este archivo pesa {size}. Con tu contacto desconectado solo esperan archivos de hasta {limit}: saldrá cuando se conecte.',
@@ -310,7 +311,8 @@ export const messages = {
       fileError: 'The file could not be sent. Try again.',
       waits: {
         online: 'It is large: it goes when your contact comes online',
-        direct: 'It is large: it goes when you have a direct connection'
+        direct: 'It is large: it goes when you have a direct connection',
+        version: 'Your contact has a version that does not receive files: it goes when they update'
       },
       notice: {
         offline: 'This file is {size}. While your contact is offline only files up to {limit} can wait: it will go when they come online.',

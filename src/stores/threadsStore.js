@@ -87,7 +87,7 @@ function mergeThreads (local, remote) {
 }
 
 /**
- * Thread entry shape: { id, dir: 'in'|'out', text, ts, pending?: boolean, file?: { name, mime, size, w, h }, waits?: 'online'|'direct' }
+ * Thread entry shape: { id, dir: 'in'|'out', text, ts, pending?: boolean, file?: { name, mime, size, w, h }, waits?: 'online'|'direct'|'version' }
  * Threads are keyed by contact pubkey.
  *
  * WIRE PROTOCOL (protocol 2). Every message is an object SEALED by the transport pillar
@@ -398,6 +398,9 @@ export const useThreadsStore = defineStore('threads', () => {
       // canal directo. Se dice en la burbuja, no se queda en un ⌛ mudo.
       if (e?.code === 'too-big-for-queue') updateEntry(item.pubkey, item.entryId, { waits: 'online' })
       if (e?.code === 'too-big-for-relay' || e?.code === 'direct-lost') updateEntry(item.pubkey, item.entryId, { waits: 'direct' })
+      // La otra punta dijo en su saludo que no entiende bytes (una versión anterior, la app
+      // nativa): sale cuando se actualice y vuelva a saludar.
+      if (e?.code === 'peer-no-binary') updateEntry(item.pubkey, item.entryId, { waits: 'version' })
       if (!outbox.value.some(x => x.entryId === item.entryId)) outbox.value.push(item)
       return false
     }
