@@ -11,7 +11,7 @@ import path from 'node:path'
  * saludo, la solicitud, aceptarla, un mensaje de ida y otro de vuelta. Después la
  * misma vuelta por el otro camino: una tercera persona entra escaneando el QR.
  *
- *   npx playwright test tests/amigos.spec.js                 (contra producción)
+ *   npx playwright test tests/friends.spec.js                 (contra producción)
  *   SITE_URL=http://localhost:4173 npx playwright test       (contra un preview)
  *
  * Cada amigo va en SU PROPIO contexto: almacenamiento aparte, o sea identidades
@@ -19,12 +19,12 @@ import path from 'node:path'
  */
 const SITE = process.env.SITE_URL || 'https://messenger.dotrino.com'
 const CODE_RE = /^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$/
-const ESPERA = 45_000
+const WAIT = 45_000
 
 /** Marca de esta corrida: los apodos y los mensajes no se pisan entre pruebas. */
-const marca = Math.random().toString(36).slice(2, 6).toUpperCase()
+const runTag = Math.random().toString(36).slice(2, 6).toUpperCase()
 
-async function entrar (browser, apodo, { proxy } = {}) {
+async function enter (browser, nickname, { proxy } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   // El tutorial tapa la UI con burbujas y no es lo que se prueba aquí.
   await context.addInitScript(() => {
@@ -36,89 +36,89 @@ async function entrar (browser, apodo, { proxy } = {}) {
   // nodos distintos sale o no según la suerte.
   if (proxy) await context.addInitScript((u) => { try { localStorage.setItem('messenger_proxy_url', u) } catch (_) {} }, proxy)
   const page = await context.newPage()
-  page.on('pageerror', (e) => console.log(`[${apodo}] PAGEERROR`, e.message))
-  if (process.env.DEBUG_CONSOLE) page.on('console', (m) => { if (/cc-conn|messenger|part|queue|WS error|error/i.test(m.text())) console.log(`[${apodo}]`, m.text().slice(0, 200)) })
+  page.on('pageerror', (e) => console.log(`[${nickname}] PAGEERROR`, e.message))
+  if (process.env.DEBUG_CONSOLE) page.on('console', (m) => { if (/cc-conn|messenger|part|queue|WS error|error/i.test(m.text())) console.log(`[${nickname}]`, m.text().slice(0, 200)) })
   await page.goto(SITE, { waitUntil: 'domcontentloaded' })
   const nick = page.getByTestId('nickname-input')
-  await nick.waitFor({ timeout: ESPERA })
-  await nick.fill(apodo)
+  await nick.waitFor({ timeout: WAIT })
+  await nick.fill(nickname)
   await page.getByTestId('nickname-submit').click()
-  return { context, page, apodo }
+  return { context, page, nickname }
 }
 
 /** El código de emparejamiento que enseña la barra superior (6 caracteres). */
-async function codigoDe (amigo) {
-  const chip = amigo.page.getByTestId('my-code')
-  await chip.waitFor({ timeout: ESPERA })
-  await expect.poll(async () => (await chip.textContent()).trim(), { timeout: ESPERA })
+async function codeOf (friend) {
+  const chip = friend.page.getByTestId('my-code')
+  await chip.waitFor({ timeout: WAIT })
+  await expect.poll(async () => (await chip.textContent()).trim(), { timeout: WAIT })
     .toMatch(CODE_RE)
   return (await chip.textContent()).trim()
 }
 
-async function abrirConversacion (amigo) {
-  const item = amigo.page.getByTestId('contact-item').first()
-  await item.waitFor({ timeout: ESPERA })
+async function openConversation (friend) {
+  const item = friend.page.getByTestId('contact-item').first()
+  await item.waitFor({ timeout: WAIT })
   await item.click()
 }
 
-async function escribir (amigo, texto) {
-  await amigo.page.getByTestId('composer-input').fill(texto)
-  await amigo.page.getByTestId('send-message').click()
+async function sendText (friend, text) {
+  await friend.page.getByTestId('composer-input').fill(text)
+  await friend.page.getByTestId('send-message').click()
 }
 
-async function aceptarSolicitud (amigo) {
-  const ok = amigo.page.getByTestId('accept-request').first()
-  await ok.waitFor({ timeout: ESPERA })
+async function acceptRequest (friend) {
+  const ok = friend.page.getByTestId('accept-request').first()
+  await ok.waitFor({ timeout: WAIT })
   await ok.click()
 }
 
 test('dos amigos se emparejan con el código y se escriben', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}`)
-  const beto = await entrar(browser, `Beto${marca}`)
+  const ana = await enter(browser, `Ana${runTag}`)
+  const beto = await enter(browser, `Beto${runTag}`)
 
   try {
     // 1) Ana ve su código: 6 caracteres que puede dictar por teléfono.
-    const codigoAna = await codigoDe(ana)
-    expect(codigoAna, 'el código de la barra no tiene la forma esperada').toMatch(CODE_RE)
+    const anaCode = await codeOf(ana)
+    expect(anaCode, 'el código de la barra no tiene la forma esperada').toMatch(CODE_RE)
 
     // 2) Beto la agrega con ese código: le manda una SOLICITUD, no un mensaje.
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
 
     // 3) A Ana le llega la solicitud. Es un mensaje de control entre los dos: en
     //    ningún chat de Ana aparece nada, y nadie es contacto de nadie todavía.
-    await ana.page.getByTestId('accept-request').first().waitFor({ timeout: ESPERA })
+    await ana.page.getByTestId('accept-request').first().waitFor({ timeout: WAIT })
     await expect(ana.page.getByTestId('msg-in')).toHaveCount(0)
     // Nadie es contacto de nadie… salvo Dotrino, que está siempre y no se puede quitar.
-    await expect(ana.page.getByTestId('contact-dotrino')).toHaveCount(1, { timeout: ESPERA })
+    await expect(ana.page.getByTestId('contact-dotrino')).toHaveCount(1, { timeout: WAIT })
     await expect(ana.page.getByTestId('contact-item')).toHaveCount(0)
     await expect(beto.page.getByTestId('contact-item')).toHaveCount(0)
-    await aceptarSolicitud(ana)
+    await acceptRequest(ana)
 
     // 4) El código es de un solo uso: en cuanto alguien lo gasta, la barra tiene
     //    que enseñar otro. Si no, el siguiente amigo teclea uno muerto.
     await expect.poll(async () => (await ana.page.getByTestId('my-code').textContent()).trim(),
-      { timeout: ESPERA, message: 'el código gastado se quedó en pantalla' })
-      .not.toBe(codigoAna)
+      { timeout: WAIT, message: 'el código gastado se quedó en pantalla' })
+      .not.toBe(anaCode)
 
     // 5) Beto la ve en sus contactos cuando ella acepta (no antes), y se escriben.
     //    Ningún chat empezó con un mensaje de la solicitud.
-    await abrirConversacion(ana)
+    await openConversation(ana)
     await expect(ana.page.getByTestId('msg-in')).toHaveCount(0)
-    const deBeto = `hola ana, soy beto ${marca}`
-    await abrirConversacion(beto)
-    await escribir(beto, deBeto)
+    const fromBeto = `hola ana, soy beto ${runTag}`
+    await openConversation(beto)
+    await sendText(beto, fromBeto)
 
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: deBeto }))
-      .toBeVisible({ timeout: ESPERA })
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: fromBeto }))
+      .toBeVisible({ timeout: WAIT })
 
-    const deAna = `te leo, beto ${marca}`
-    await escribir(ana, deAna)
-    await expect(beto.page.getByTestId('msg-in').filter({ hasText: deAna }))
-      .toBeVisible({ timeout: ESPERA })
+    const fromAna = `te leo, beto ${runTag}`
+    await sendText(ana, fromAna)
+    await expect(beto.page.getByTestId('msg-in').filter({ hasText: fromAna }))
+      .toBeVisible({ timeout: WAIT })
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})
@@ -133,16 +133,16 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
 test('un amigo le manda una foto al otro, byte a byte', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}F`)
-  const beto = await entrar(browser, `Beto${marca}F`)
+  const ana = await enter(browser, `Ana${runTag}F`)
+  const beto = await enter(browser, `Beto${runTag}F`)
   try {
-    const codigoAna = await codigoDe(ana)
+    const anaCode = await codeOf(ana)
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
-    await abrirConversacion(ana)
-    await abrirConversacion(beto)
+    await acceptRequest(ana)
+    await openConversation(ana)
+    await openConversation(beto)
 
     // Un PNG de ~5 MB con ruido (no comprime): el tamaño de una foto de teléfono.
     const png = await beto.page.evaluate(() => {
@@ -155,22 +155,22 @@ test('un amigo le manda una foto al otro, byte a byte', async () => {
       ctx.putImageData(img, 0, 0)
       return c.toDataURL('image/png').split(',')[1]
     })
-    const pie = `mira esto ${marca}`
-    await beto.page.getByTestId('composer-input').fill(pie)
+    const caption = `mira esto ${runTag}`
+    await beto.page.getByTestId('composer-input').fill(caption)
     const t0 = Date.now()
     await beto.page.getByTestId('file-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
 
-    const recibida = ana.page.getByTestId('msg-in').filter({ hasText: pie })
-    const img = recibida.getByTestId('msg-image').locator('img')
-    await expect(img).toBeVisible({ timeout: ESPERA })
-    console.log(`foto de ${(png.length * 0.75 / 1048576).toFixed(1)} MB entregada en ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+    const received = ana.page.getByTestId('msg-in').filter({ hasText: caption })
+    const img = received.getByTestId('msg-image').locator('img')
+    await expect(img).toBeVisible({ timeout: WAIT })
+    console.log(`photo of ${(png.length * 0.75 / 1048576).toFixed(1)} MB delivered in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
     expect(await img.getAttribute('src'), 'llegan los mismos bytes, sin recomprimir').toBe(`data:image/png;base64,${png}`)
 
     // Quien la mandó la ve con el acuse (✓), y la foto sigue ahí al recargar.
-    await expect(beto.page.getByTestId('msg-out').filter({ hasText: pie }).locator('.check')).toHaveText('✓', { timeout: ESPERA })
+    await expect(beto.page.getByTestId('msg-out').filter({ hasText: caption }).locator('.check')).toHaveText('✓', { timeout: WAIT })
     await ana.page.reload()
-    await abrirConversacion(ana)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: pie }).getByTestId('msg-image')).toBeVisible({ timeout: ESPERA })
+    await openConversation(ana)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: caption }).getByTestId('msg-image')).toBeVisible({ timeout: WAIT })
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})
@@ -186,19 +186,19 @@ test('una foto para alguien desconectado le llega al volver', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
   // En nodos distintos: Ana vive en proxy1 (su cola, en el content) y Beto escribe desde proxy2.
-  const ana = await entrar(browser, `Ana${marca}O`, { proxy: 'wss://proxy.dotrino.com' })
-  const beto = await entrar(browser, `Beto${marca}O`, { proxy: 'wss://proxy2.dotrino.com' })
+  const ana = await enter(browser, `Ana${runTag}O`, { proxy: 'wss://proxy.dotrino.com' })
+  const beto = await enter(browser, `Beto${runTag}O`, { proxy: 'wss://proxy2.dotrino.com' })
   try {
-    const codigoAna = await codigoDe(ana)
+    const anaCode = await codeOf(ana)
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
-    await abrirConversacion(ana)
-    await abrirConversacion(beto)
+    await acceptRequest(ana)
+    await openConversation(ana)
+    await openConversation(beto)
     // Que se hayan visto una vez (un texto de ida), y Ana cierra la app.
-    await escribir(beto, `antes ${marca}`)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `antes ${marca}` })).toBeVisible({ timeout: ESPERA })
+    await sendText(beto, `before ${runTag}`)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `before ${runTag}` })).toBeVisible({ timeout: WAIT })
     await ana.page.close()
     await beto.page.waitForTimeout(3000)
 
@@ -212,18 +212,18 @@ test('una foto para alguien desconectado le llega al volver', async () => {
       ctx.putImageData(img, 0, 0)
       return c.toDataURL('image/png').split(',')[1]
     })
-    const pie = `mientras no estabas ${marca}`
-    await beto.page.getByTestId('composer-input').fill(pie)
+    const caption = `mientras no estabas ${runTag}`
+    await beto.page.getByTestId('composer-input').fill(caption)
     await beto.page.getByTestId('file-input').setInputFiles({ name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
     await beto.page.waitForTimeout(5000)
 
     // Ana vuelve: la cola del proxio le entrega la foto entera.
     ana.page = await ana.context.newPage()
     await ana.page.goto(SITE, { waitUntil: 'domcontentloaded' })
-    await abrirConversacion(ana)
-    const img = ana.page.getByTestId('msg-in').filter({ hasText: pie }).getByTestId('msg-image').locator('img')
-    await expect(img).toBeVisible({ timeout: ESPERA })
-    console.log(`foto de ${(png.length * 0.75 / 1048576).toFixed(1)} MB entregada desde la cola`)
+    await openConversation(ana)
+    const img = ana.page.getByTestId('msg-in').filter({ hasText: caption }).getByTestId('msg-image').locator('img')
+    await expect(img).toBeVisible({ timeout: WAIT })
+    console.log(`photo of ${(png.length * 0.75 / 1048576).toFixed(1)} MB delivered from the queue`)
     expect(await img.getAttribute('src')).toBe(`data:image/png;base64,${png}`)
   } finally {
     await ana.context.close().catch(() => {})
@@ -239,21 +239,21 @@ test('una foto para alguien desconectado le llega al volver', async () => {
 test('un archivo que no es foto llega con su nombre y se descarga igual', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}P`)
-  const beto = await entrar(browser, `Beto${marca}P`)
+  const ana = await enter(browser, `Ana${runTag}P`)
+  const beto = await enter(browser, `Beto${runTag}P`)
   try {
-    const codigoAna = await codigoDe(ana)
+    const anaCode = await codeOf(ana)
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
-    await abrirConversacion(ana)
-    await abrirConversacion(beto)
+    await acceptRequest(ana)
+    await openConversation(ana)
+    await openConversation(beto)
 
     // Con los dos conectados, la cabecera dice el camino (y no «desconectado»).
-    const ruta = beto.page.getByTestId('route')
-    await expect(ruta).not.toHaveAttribute('data-route', 'offline', { timeout: ESPERA })
-    console.log('camino:', await ruta.getAttribute('data-route'), '·', (await ruta.textContent()).trim())
+    const route = beto.page.getByTestId('route')
+    await expect(route).not.toHaveAttribute('data-route', 'offline', { timeout: WAIT })
+    console.log('route:', await route.getAttribute('data-route'), '·', (await route.textContent()).trim())
     if (process.env.SHOT) {
       await beto.page.screenshot({ path: process.env.SHOT + '-desk.png' })
       await beto.page.setViewportSize({ width: 390, height: 800 })
@@ -263,16 +263,16 @@ test('un archivo que no es foto llega con su nombre y se descarga igual', async 
 
     const bytes = Buffer.from(Array.from({ length: 300_000 }, (_, i) => (i * 31) % 256))
     await beto.page.getByTestId('file-input').setInputFiles({ name: 'informe final.pdf', mimeType: 'application/pdf', buffer: bytes })
-    const ficha = ana.page.getByTestId('msg-in').getByTestId('msg-file')
-    await expect(ficha.getByTestId('msg-file-name')).toHaveText('informe final.pdf', { timeout: ESPERA })
-    const [descarga] = await Promise.all([
+    const fileCard = ana.page.getByTestId('msg-in').getByTestId('msg-file')
+    await expect(fileCard.getByTestId('msg-file-name')).toHaveText('informe final.pdf', { timeout: WAIT })
+    const [download] = await Promise.all([
       ana.page.waitForEvent('download'),
-      ficha.getByTestId('msg-file-download').click()
+      fileCard.getByTestId('msg-file-download').click()
     ])
-    expect(descarga.suggestedFilename()).toBe('informe final.pdf')
-    const ruta2 = await descarga.path()
+    expect(download.suggestedFilename()).toBe('informe final.pdf')
+    const downloadPath = await download.path()
     const fs2 = await import('node:fs')
-    expect(Buffer.compare(fs2.readFileSync(ruta2), bytes), 'se descargan los mismos bytes').toBe(0)
+    expect(Buffer.compare(fs2.readFileSync(downloadPath), bytes), 'se descargan los mismos bytes').toBe(0)
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})
@@ -287,24 +287,24 @@ test('un archivo que no es foto llega con su nombre y se descarga igual', async 
 test('un archivo grande para alguien desconectado avisa del tope y espera', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}T`)
-  const beto = await entrar(browser, `Beto${marca}T`)
+  const ana = await enter(browser, `Ana${runTag}T`)
+  const beto = await enter(browser, `Beto${runTag}T`)
   try {
-    const codigoAna = await codigoDe(ana)
+    const anaCode = await codeOf(ana)
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
-    await abrirConversacion(ana)
-    await abrirConversacion(beto)
-    await escribir(beto, `antes ${marca}`)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `antes ${marca}` })).toBeVisible({ timeout: ESPERA })
+    await acceptRequest(ana)
+    await openConversation(ana)
+    await openConversation(beto)
+    await sendText(beto, `before ${runTag}`)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: `before ${runTag}` })).toBeVisible({ timeout: WAIT })
     await ana.page.close()
-    await expect(beto.page.getByTestId('route')).toHaveAttribute('data-route', 'offline', { timeout: ESPERA })
+    await expect(beto.page.getByTestId('route')).toHaveAttribute('data-route', 'offline', { timeout: WAIT })
 
     await beto.page.getByTestId('file-input').setInputFiles({ name: 'video.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(9 * 1024 * 1024, 7) })
-    await expect(beto.page.getByTestId('file-notice')).toContainText('8', { timeout: ESPERA })
-    await expect(beto.page.getByTestId('msg-out').getByTestId('msg-waits')).toHaveAttribute('data-waits', 'online', { timeout: ESPERA })
+    await expect(beto.page.getByTestId('file-notice')).toContainText('8', { timeout: WAIT })
+    await expect(beto.page.getByTestId('msg-out').getByTestId('msg-waits')).toHaveAttribute('data-waits', 'online', { timeout: WAIT })
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})
@@ -320,45 +320,45 @@ test('un archivo grande para alguien desconectado avisa del tope y espera', asyn
 test('lo de alguien bloqueado no llega; al desbloquear, sí', async () => {
   test.setTimeout(240_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}B`)
-  const beto = await entrar(browser, `Beto${marca}B`)
+  const ana = await enter(browser, `Ana${runTag}B`)
+  const beto = await enter(browser, `Beto${runTag}B`)
   try {
-    const codigoAna = await codigoDe(ana)
+    const anaCode = await codeOf(ana)
     await beto.page.getByTestId('add-contact').click()
-    await beto.page.getByTestId('code-input').fill(codigoAna)
+    await beto.page.getByTestId('code-input').fill(anaCode)
     await beto.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
-    await abrirConversacion(ana)
-    await abrirConversacion(beto)
+    await acceptRequest(ana)
+    await openConversation(ana)
+    await openConversation(beto)
 
     // Antes de bloquear, llega: si no, la prueba no prueba nada.
-    const antes = `antes ${marca}`
-    await escribir(beto, antes)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: antes })).toBeVisible({ timeout: ESPERA })
+    const before = `before ${runTag}`
+    await sendText(beto, before)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: before })).toBeVisible({ timeout: WAIT })
 
     // Ana lo bloquea desde la tarjeta.
     await ana.page.getByTestId('rate-contact').click()
     const toggle = ana.page.locator('dotrino-profile').getByTestId('profile-block-toggle')
-    await toggle.waitFor({ timeout: ESPERA })
+    await toggle.waitFor({ timeout: WAIT })
     await toggle.click()
-    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).toHaveClass(/\bon\b/, { timeout: ESPERA })
+    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).toHaveClass(/\bon\b/, { timeout: WAIT })
     await ana.page.keyboard.press('Escape')
-    await expect(ana.page.getByTestId('contact-blocked')).toBeVisible({ timeout: ESPERA })
+    await expect(ana.page.getByTestId('contact-blocked')).toBeVisible({ timeout: WAIT })
 
-    const bloqueado = `bloqueado ${marca}`
-    await escribir(beto, bloqueado)
+    const blocked = `blocked ${runTag}`
+    await sendText(beto, blocked)
     await ana.page.waitForTimeout(15_000)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: bloqueado })).toHaveCount(0)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: blocked })).toHaveCount(0)
 
     // Desbloquea, y lo siguiente vuelve a llegar.
     await ana.page.getByTestId('rate-contact').click()
-    await toggle.waitFor({ timeout: ESPERA })
+    await toggle.waitFor({ timeout: WAIT })
     await toggle.click()
-    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).not.toHaveClass(/\bon\b/, { timeout: ESPERA })
+    await expect(ana.page.locator('dotrino-profile').getByTestId('profile-block')).not.toHaveClass(/\bon\b/, { timeout: WAIT })
     await ana.page.keyboard.press('Escape')
-    const despues = `despues ${marca}`
-    await escribir(beto, despues)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: despues })).toBeVisible({ timeout: ESPERA })
+    const after = `after ${runTag}`
+    await sendText(beto, after)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: after })).toBeVisible({ timeout: WAIT })
   } finally {
     await ana.context.close().catch(() => {})
     await beto.context.close().catch(() => {})
@@ -369,11 +369,11 @@ test('lo de alguien bloqueado no llega; al desbloquear, sí', async () => {
 test('tocar el código de la barra abre «Mi código» con el mismo código y su QR', async () => {
   test.setTimeout(120_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}C`)
+  const ana = await enter(browser, `Ana${runTag}C`)
   try {
-    const codigo = await codigoDe(ana)
+    const pairCode = await codeOf(ana)
     await ana.page.getByTestId('my-code').click()
-    await expect(ana.page.getByTestId('my-pairing-code')).toHaveText(codigo, { timeout: ESPERA })
+    await expect(ana.page.getByTestId('my-pairing-code')).toHaveText(pairCode, { timeout: WAIT })
     await expect(ana.page.getByTestId('my-qr')).toBeVisible()
     // Y el «+» sigue abriendo la pestaña de agregar por código.
     await ana.page.getByTestId('close-add').click()
@@ -388,19 +388,19 @@ test('tocar el código de la barra abre «Mi código» con el mismo código y su
 test('una amiga entra escaneando el QR del otro', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}Q`)
-  const carla = await entrar(browser, `Carla${marca}`)
-  const png = path.join(os.tmpdir(), `dotrino-qr-${marca}.png`)
+  const ana = await enter(browser, `Ana${runTag}Q`)
+  const carla = await enter(browser, `Carla${runTag}`)
+  const png = path.join(os.tmpdir(), `dotrino-qr-${runTag}.png`)
 
   try {
-    await codigoDe(ana)
+    await codeOf(ana)
 
     // 1) Ana enseña su QR. Se guarda la imagen para dársela al escáner: es la
     //    misma que vería una cámara apuntando a la pantalla, sin cámara de por medio.
     await ana.page.getByTestId('add-contact').click()
     await ana.page.getByTestId('share-my-token-tab').click()
     const qr = ana.page.getByTestId('my-qr')
-    await qr.waitFor({ timeout: ESPERA })
+    await qr.waitFor({ timeout: WAIT })
     await qr.screenshot({ path: png })
     expect(fs.statSync(png).size, 'la captura del QR salió vacía').toBeGreaterThan(0)
     await ana.page.getByTestId('close-add').click()
@@ -410,19 +410,19 @@ test('una amiga entra escaneando el QR del otro', async () => {
     await carla.page.getByTestId('add-contact').click()
     await carla.page.getByTestId('scan-qr').click()
     const file = carla.page.locator('dotrino-qr-scan input[type=file]')
-    await file.waitFor({ state: 'attached', timeout: ESPERA })
+    await file.waitFor({ state: 'attached', timeout: WAIT })
     await file.setInputFiles(png)
 
     // 3) De ahí sale el saludo sin teclear nada: a Ana le llega la solicitud.
-    await aceptarSolicitud(ana)
+    await acceptRequest(ana)
 
     // 4) Y conversan, que es la prueba de que el emparejamiento fue real.
-    const deCarla = `vengo por el QR ${marca}`
-    await abrirConversacion(carla)
-    await escribir(carla, deCarla)
-    await abrirConversacion(ana)
-    await expect(ana.page.getByTestId('msg-in').filter({ hasText: deCarla }))
-      .toBeVisible({ timeout: ESPERA })
+    const fromCarla = `vengo por el QR ${runTag}`
+    await openConversation(carla)
+    await sendText(carla, fromCarla)
+    await openConversation(ana)
+    await expect(ana.page.getByTestId('msg-in').filter({ hasText: fromCarla }))
+      .toBeVisible({ timeout: WAIT })
   } finally {
     try { fs.unlinkSync(png) } catch (_) {}
     await ana.context.close().catch(() => {})
@@ -434,26 +434,26 @@ test('una amiga entra escaneando el QR del otro', async () => {
 test('el enlace del QR abre la app con el código puesto', async () => {
   test.setTimeout(180_000)
   const browser = await chromium.launch()
-  const ana = await entrar(browser, `Ana${marca}L`)
+  const ana = await enter(browser, `Ana${runTag}L`)
   let dani = null
 
   try {
-    const codigo = await codigoDe(ana)
+    const pairCode = await codeOf(ana)
 
     // Quien apunta la cámara del sistema al QR no entra a la app: entra al ENLACE
     // que lleva dentro. Ese camino tiene que dejar el código escrito, o la persona
     // acaba tecleando lo mismo que acaba de escanear.
-    dani = await entrar(browser, `Dani${marca}`)
-    await dani.page.goto(`${SITE}#add=${codigo}`, { waitUntil: 'domcontentloaded' })
+    dani = await enter(browser, `Dani${runTag}`)
+    await dani.page.goto(`${SITE}#add=${pairCode}`, { waitUntil: 'domcontentloaded' })
 
     const input = dani.page.getByTestId('code-input')
-    await input.waitFor({ timeout: ESPERA })
-    await expect(input).toHaveValue(codigo)
+    await input.waitFor({ timeout: WAIT })
+    await expect(input).toHaveValue(pairCode)
     // Y el enlace se limpia: recargar no reintenta un código ya quemado.
     expect(await dani.page.evaluate(() => location.hash)).toBe('')
 
     await dani.page.getByTestId('send-hello').click()
-    await aceptarSolicitud(ana)
+    await acceptRequest(ana)
   } finally {
     await ana.context.close().catch(() => {})
     if (dani) await dani.context.close().catch(() => {})

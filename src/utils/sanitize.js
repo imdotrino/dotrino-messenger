@@ -6,7 +6,7 @@
  * Todo lo que esta app pinta pasa por la interpolación de Vue (`{{ … }}`) o por
  * `textContent`: las dos tratan el valor como TEXTO y nunca como marcado, así
  * que la protección contra HTML inyectado vive en el pintado, no aquí. No hay un solo `v-html` ni un solo `innerHTML` con datos del usuario en
- * todo el repo, y el test `tests/texto-literal.spec.js` lo fija.
+ * todo el repo, y el test `tests/literal-text.spec.js` lo fija.
  *
  * Escapar además en este punto no protegía de nada y rompía el texto dos veces:
  *

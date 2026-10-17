@@ -10,7 +10,7 @@ import { getStore, onVaultChanged } from '../services/store'
 import { getReputation } from '../services/reputation'
 import { sanitizeMessage, sanitizeNickname } from '../utils/sanitize'
 import { key as accountKey } from '../services/account'
-import { MINE as MI_VERSION, revisar } from '../services/compat'
+import { MINE as MY_VERSION, checkPeer } from '../services/compat'
 import { readFile, validIncomingFile, toBase64 } from '../utils/file'
 
 // LOS BYTES DE LOS ARCHIVOS van en su propio hilo del almacén (`file:<contacto>`). En el
@@ -78,10 +78,10 @@ const saveLocalCache = (data) => {
 function mergeThreads (local, remote) {
   const out = {}
   for (const k of new Set([...Object.keys(local || {}), ...Object.keys(remote || {})])) {
-    const porId = new Map()
-    for (const e of (local?.[k] || [])) if (e?.id) porId.set(e.id, e)
-    for (const e of (remote?.[k] || [])) if (e?.id) porId.set(e.id, { ...porId.get(e.id), ...e })
-    out[k] = [...porId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-MAX_THREAD)
+    const byId = new Map()
+    for (const e of (local?.[k] || [])) if (e?.id) byId.set(e.id, e)
+    for (const e of (remote?.[k] || [])) if (e?.id) byId.set(e.id, { ...byId.get(e.id), ...e })
+    out[k] = [...byId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-MAX_THREAD)
   }
   return out
 }
@@ -215,13 +215,13 @@ export const useThreadsStore = defineStore('threads', () => {
   const markThreadRead = async (pubkey) => {
     const arr = threads.value[pubkey]
     if (!arr) return
-    const nuevas = arr.filter(e => e.dir === 'in' && !e._read)
-    if (!nuevas.length) return
-    for (const e of nuevas) e._read = true
+    const unread = arr.filter(e => e.dir === 'in' && !e._read)
+    if (!unread.length) return
+    for (const e of unread) e._read = true
     saveLocalCache(threads.value)
     const store = await getStore()
     if (!store) return
-    for (const e of nuevas) {
+    for (const e of unread) {
       try { await store.appendMessage(pubkey, e) } catch (_) { /* se reintenta al releer */ }
     }
   }
@@ -281,7 +281,7 @@ export const useThreadsStore = defineStore('threads', () => {
     const card = await id.profileCard?.().catch(() => null)
     return {
       nickname: connection.nickname,
-      v: MI_VERSION,              // qué soy y qué versión corro (§14)
+      v: MY_VERSION,              // qué soy y qué versión corro (§14)
       ...(card ? { card } : {})
     }
   }
@@ -340,14 +340,14 @@ export const useThreadsStore = defineStore('threads', () => {
     filesLoaded.add(pubkey)
     try {
       const list = await store.listThread(fileKey(pubkey))
-      const porArchivo = new Map()
+      const byFile = new Map()
       for (const e of list || []) {
         if (!e?.msg || typeof e.data !== 'string' || !e.mime || !Number.isInteger(e.i) || !Number.isInteger(e.n)) continue
-        if (!porArchivo.has(e.msg)) porArchivo.set(e.msg, { mime: e.mime, n: e.n, parts: [] })
-        porArchivo.get(e.msg).parts[e.i] = e.data
+        if (!byFile.has(e.msg)) byFile.set(e.msg, { mime: e.mime, n: e.n, parts: [] })
+        byFile.get(e.msg).parts[e.i] = e.data
       }
       const next = { ...files.value }
-      for (const [id, f] of porArchivo) {
+      for (const [id, f] of byFile) {
         const parts = f.parts.slice(0, f.n)
         // Un archivo al que le falta un trozo (todavía llegando de otro aparato) no se enseña a medias.
         if (parts.length === f.n && parts.every((p) => typeof p === 'string')) next[id] = `data:${f.mime};base64,${parts.join('')}`
@@ -408,9 +408,9 @@ export const useThreadsStore = defineStore('threads', () => {
 
   const flushOutbox = async () => {
     if (outbox.value.length === 0) return
-    const pendientes = outbox.value
+    const pending = outbox.value
     outbox.value = []
-    for (const item of pendientes) await deliver(item)
+    for (const item of pending) await deliver(item)
   }
 
   // ---- Greeting between contacts (presence) ------------------------------
@@ -541,11 +541,11 @@ export const useThreadsStore = defineStore('threads', () => {
   const noteProfile = async (pubkey, payload) => {
     // Qué versión corre el otro lado (§14). No bloquea: se anota y la conversación lo
     // enseña. Sin esto, hablarle a una versión que no entiende se ve como silencio.
-    const desajuste = revisar(payload.v)
-    if (desajuste) peerCompat.value = { ...peerCompat.value, [pubkey]: desajuste }
+    const mismatch = checkPeer(payload.v)
+    if (mismatch) peerCompat.value = { ...peerCompat.value, [pubkey]: mismatch }
     else if (peerCompat.value[pubkey]) {
-      const { [pubkey]: _fuera, ...resto } = peerCompat.value
-      peerCompat.value = resto
+      const { [pubkey]: _removed, ...rest } = peerCompat.value
+      peerCompat.value = rest
     }
     // Su tarjeta de perfil: con ella podremos cifrarle a todos sus dispositivos. El vault
     // la verifica y no acepta retrocesos ni cambios de master en silencio.
@@ -726,12 +726,12 @@ export const useThreadsStore = defineStore('threads', () => {
     const pubkey = contact.publickey
     // Nace leído si su conversación está abierta y la ventana a la vista: si no,
     // el contador subiría con el mensaje delante de los ojos del usuario.
-    const leido = activePubkey.value === pubkey &&
+    const read = activePubkey.value === pubkey &&
       (typeof document === 'undefined' || document.visibilityState === 'visible')
     // El mismo mensaje puede llegar dos veces (cola offline + en vivo): una vez basta.
     if (!(threads.value[pubkey] || []).some(e => e.id === mid)) {
       if (file) await saveFile(pubkey, mid, file)
-      append(pubkey, { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(file ? { file: { name: file.name, mime: file.mime, size: file.size, w: file.w, h: file.h } } : {}), ...(leido ? { _read: true } : {}) })
+      append(pubkey, { id: mid, dir: 'in', text: cleanText, ts, queued: !!meta.queued, queuedAt: meta.queuedAt || null, ...(file ? { file: { name: file.name, mime: file.mime, size: file.size, w: file.w, h: file.h } } : {}), ...(read ? { _read: true } : {}) })
       notify('message', {
         id: mid,
         fromPubkey: pubkey,

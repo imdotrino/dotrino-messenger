@@ -42,7 +42,7 @@ const contacts = useContactsStore()
 const threads = useThreadsStore()
 
 // El botón del aviso del almacén: vuelve a intentarlo y, si tampoco se puede, lo dice.
-const reintentarAlmacen = async () => {
+const retryStore = async () => {
   try {
     await vaultSyncNow()
   } catch (e) {
@@ -55,18 +55,18 @@ const showAdd = ref(false)
 // tutorial mira si la visita venía limpia) y se limpia la barra en cuanto se usa,
 // para que recargar no vuelva a disparar el mismo emparejamiento con un código ya
 // quemado. El código va en el #fragment, que nunca llega al servidor.
-const leerCodigoEntrante = () => {
+const readIncomingCode = () => {
   const m = (location.hash || '').match(/[#&]add=([^&]+)/i)
   return m ? decodeURIComponent(m[1]).toUpperCase().slice(0, 8) : ''
 }
-let incomingCode = leerCodigoEntrante()
+let incomingCode = readIncomingCode()
 const pendingCode = ref('')
 /**
  * Enlace entrante `#to=<llave>&nick=<apodo>`: escribirle a alguien de quien se tiene la
  * llave pero no un código. Lo pone el correo de feedback.dotrino.com para que la cuenta de
  * Dotrino conteste a quien pidió algo. La llave va en base64url y en el #fragment.
  */
-const leerDestinoEntrante = () => {
+const readIncomingPeer = () => {
   const h = location.hash || ''
   const m = h.match(/[#&]to=([^&]+)/i)
   if (!m) return null
@@ -89,7 +89,7 @@ const leerDestinoEntrante = () => {
     return null
   }
 }
-let incomingPeer = leerDestinoEntrante()
+let incomingPeer = readIncomingPeer()
 const pendingPeer = ref(null)
 /**
  * Abre "añadir contacto" con el código del enlace ya escrito. Se llama en los dos
@@ -97,9 +97,9 @@ const pendingPeer = ref(null)
  * acaba de crearse el apodo — al recién llegado es a quien MÁS le duele perder el
  * código con el que venía.
  */
-const usarCodigoEntrante = () => {
-  const peer = incomingPeer || leerDestinoEntrante()
-  const code = peer ? '' : (incomingCode || leerCodigoEntrante())
+const useIncomingCode = () => {
+  const peer = incomingPeer || readIncomingPeer()
+  const code = peer ? '' : (incomingCode || readIncomingCode())
   if (!peer && !code) return
   incomingCode = ''
   incomingPeer = null
@@ -113,7 +113,7 @@ const usarCodigoEntrante = () => {
 // ahí no pasaba nada — la dirección cambiaba y la app ni se enteraba.
 if (typeof window !== 'undefined') {
   window.addEventListener('hashchange', () => {
-    if (connection.nicknameSet) usarCodigoEntrante()
+    if (connection.nicknameSet) useIncomingCode()
   })
 }
 const showNotif = ref(false)
@@ -125,8 +125,8 @@ const ratingFor = ref(null)
  * decía: la app aparecía con el nombre de la cuenta anterior, otro avatar, sin
  * contactos y sin chats, y no había forma de saber que estabas en otra cuenta.
  */
-const avisoCuenta = ref(accountChanged() ? 'switched' : '')
-const cerrarAvisoCuenta = () => { avisoCuenta.value = '' }
+const accountNotice = ref(accountChanged() ? 'switched' : '')
+const closeAccountNotice = () => { accountNotice.value = '' }
 
 /**
  * El vault avisa de lo que le pasa a esta cuenta. Los dos que importan aquí:
@@ -134,16 +134,16 @@ const cerrarAvisoCuenta = () => { avisoCuenta.value = '' }
  * aviso FIRMADO) y `unpaired` (se soltó la bóveda a propósito). El primero deja
  * huérfano el espejo local; el segundo NO borra nada, solo se avisa.
  */
-const escucharVault = (id) => {
+const listenToVault = (id) => {
   try {
     id.onVault?.((ev) => {
-      const fase = ev?.phase
-      if (fase === 'account-removed' || fase === 'revoked') {
+      const phase = ev?.phase
+      if (phase === 'account-removed' || phase === 'revoked') {
         const ida = ev?.removed || accountId()
         forgetAccount(ida)
-        avisoCuenta.value = 'removed'
-      } else if (fase === 'unpaired') {
-        avisoCuenta.value = 'unpaired'
+        accountNotice.value = 'removed'
+      } else if (phase === 'unpaired') {
+        accountNotice.value = 'unpaired'
       }
     })
   } catch (_) { /* cliente viejo sin eventos de vault */ }
@@ -207,7 +207,7 @@ onMounted(async () => {
       // Pilares para el botón/modal de perfil del topbar (§6.1).
       identityInst.value = id
       reputationInst.value = await getReputation()
-      escucharVault(id)
+      listenToVault(id)
       const vaultNick = id.me?.nickname
       if (vaultNick && vaultNick !== connection.nickname) {
         // El vault es la fuente de verdad: si trae nickname y difiere del
@@ -234,7 +234,7 @@ onMounted(async () => {
   }
   maybeStartTutorial()
   // Después del tutorial (que se salta solo cuando hay enlace entrante).
-  if (connection.nicknameSet) usarCodigoEntrante()
+  if (connection.nicknameSet) useIncomingCode()
 })
 
 // Avisamos a todos los contactos: si están conectados les llega ya, si no queda en cola
@@ -252,7 +252,7 @@ const handleNicknameSet = async (nick) => {
   await contacts.refreshPeers()
   setTimeout(announceToKnown, 500)
   maybeStartTutorial()
-  usarCodigoEntrante()
+  useIncomingCode()
 }
 
 const onSelectContact = (pubkey) => {
@@ -379,16 +379,16 @@ const maybeStartTutorial = () => {
     <!-- Qué cuenta es esta. Se dice, no se disimula: el contenido de la app (nombre,
          avatar, contactos, chats) es de la cuenta activa, y si cambió hay que poder
          entender por qué está todo distinto. -->
-    <div v-if="avisoCuenta" class="account-note" role="status">
-      <span>{{ t.account[avisoCuenta] }}</span>
-      <button class="account-x" @click="cerrarAvisoCuenta" :aria-label="t.account.close">×</button>
+    <div v-if="accountNotice" class="account-note" role="status">
+      <span>{{ t.account[accountNotice] }}</span>
+      <button class="account-x" @click="closeAccountNotice" :aria-label="t.account.close">×</button>
     </div>
 
     <!-- Sin almacén no hay historial, y el respaldo en tu bóveda puede quedarse caído:
          se dice, en vez de seguir como si nada. -->
     <div v-if="storeStatus.error || storeStatus.vault.state === 'error'" class="account-note" role="status" data-testid="store-note">
       <span>{{ storeStatus.error ? t.store.unreachable : t.store.vaultError }}</span>
-      <button class="btn" @click="reintentarAlmacen">{{ t.store.retry }}</button>
+      <button class="btn" @click="retryStore">{{ t.store.retry }}</button>
     </div>
 
     <main class="layout" :class="{ 'show-side': showSidebarMobile }">

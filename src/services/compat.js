@@ -34,7 +34,7 @@ const BROKEN = []
  * ¿Entiendo a quien me habla? Devuelve `null` si todo bien, o el motivo en llano.
  * Quien no se declara es una versión anterior a §14: se deja pasar y se dice.
  */
-export function revisar (theirs) {
+export function checkPeer (theirs) {
   if (!theirs) return 'unknown'
   try {
     const v = check({ mine: MINE, theirs, broken: BROKEN })

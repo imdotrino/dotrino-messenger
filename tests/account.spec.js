@@ -11,12 +11,12 @@ import { test, expect, chromium } from '@playwright/test'
  *     tarjeta, sin código.
  *   · El contacto queda guardado por su cuenta (con tarjeta de perfil), y se escriben.
  *
- *   SITE_URL=http://localhost:4173 npx playwright test tests/cuenta.spec.js
+ *   SITE_URL=http://localhost:4173 npx playwright test tests/account.spec.js
  */
 const SITE = process.env.SITE_URL || 'https://messenger.dotrino.com'
-const ESPERA = 45_000
+const WAIT = 45_000
 
-async function entrar (browser, apodo) {
+async function enter (browser, nickname) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   await context.addInitScript(() => {
     for (const id of ['profile', 'token', 'add', 'share', 'contacts', 'compose']) {
@@ -24,11 +24,11 @@ async function entrar (browser, apodo) {
     }
   })
   const page = await context.newPage()
-  page.on('pageerror', (e) => console.log(`[${apodo}] PAGEERROR`, e.message))
+  page.on('pageerror', (e) => console.log(`[${nickname}] PAGEERROR`, e.message))
   await page.goto(SITE)
-  await page.getByTestId('nickname-input').fill(apodo)
+  await page.getByTestId('nickname-input').fill(nickname)
   await page.getByTestId('nickname-submit').click()
-  await page.getByTestId('my-code').waitFor({ timeout: ESPERA })
+  await page.getByTestId('my-code').waitFor({ timeout: WAIT })
   return { context, page }
 }
 
@@ -40,28 +40,28 @@ const store = (page, name, fn) => page.evaluate(([n, src]) => {
 
 test('Dotrino fijo, enlace #to= y contacto por cuenta', async () => {
   const browser = await chromium.launch()
-  const ana = await entrar(browser, 'Ana')
-  const beto = await entrar(browser, 'Beto')
+  const ana = await enter(browser, 'Ana')
+  const beto = await enter(browser, 'Beto')
 
   // Dotrino está sin agregarlo, y sin aparatos conocidos no se le puede escribir todavía.
-  await ana.page.getByTestId('contact-dotrino').click({ timeout: ESPERA })
+  await ana.page.getByTestId('contact-dotrino').click({ timeout: WAIT })
   await expect(ana.page.getByTestId('no-devices')).toBeVisible()
   await expect(ana.page.getByTestId('composer-input')).toBeDisabled()
 
   // El enlace del correo: la llave de Beto en base64url, en el #fragment.
-  await expect.poll(() => store(beto.page, 'connection', (s) => s.myPublickey), { timeout: ESPERA }).toBeTruthy()
-  const llave = await store(beto.page, 'connection', (s) => s.myPublickey)
-  const b64 = Buffer.from(llave).toString('base64url')
+  await expect.poll(() => store(beto.page, 'connection', (s) => s.myPublickey), { timeout: WAIT }).toBeTruthy()
+  const pubkey = await store(beto.page, 'connection', (s) => s.myPublickey)
+  const b64 = Buffer.from(pubkey).toString('base64url')
   // Con su tarjeta de perfil, como la pone el correo: se sella con las llaves que ella lista.
   const card = await beto.page.evaluate(() => document.querySelector('dotrino-topbar').identity.profileCard())
   expect(card, 'una cuenta recién creada ya tiene tarjeta').toBeTruthy()
   const cardB64 = Buffer.from(JSON.stringify(card)).toString('base64url')
   await ana.page.goto(SITE + '/#to=' + b64 + '&nick=Beto&card=' + cardB64)
-  await expect(ana.page.getByTestId('to-info')).toContainText('Beto', { timeout: ESPERA })
+  await expect(ana.page.getByTestId('to-info')).toContainText('Beto', { timeout: WAIT })
   await ana.page.getByTestId('send-hello').click()
 
-  await beto.page.getByTestId('accept-request').first().click({ timeout: ESPERA })
-  await ana.page.getByTestId('contact-item').waitFor({ timeout: ESPERA })
+  await beto.page.getByTestId('accept-request').first().click({ timeout: WAIT })
+  await ana.page.getByTestId('contact-item').waitFor({ timeout: WAIT })
 
   // Guardado por su CUENTA: con tarjeta de perfil, y se le escribe a sus aparatos.
   const beto4ana = await store(ana.page, 'contacts', (s) => s.contacts
@@ -73,6 +73,6 @@ test('Dotrino fijo, enlace #to= y contacto por cuenta', async () => {
   await ana.page.getByTestId('composer-input').fill('hola por cuenta')
   await ana.page.getByTestId('send-message').click()
   await beto.page.getByTestId('contact-item').click()
-  await expect(beto.page.getByTestId('msg-text').last()).toHaveText('hola por cuenta', { timeout: ESPERA })
+  await expect(beto.page.getByTestId('msg-text').last()).toHaveText('hola por cuenta', { timeout: WAIT })
   await browser.close()
 })

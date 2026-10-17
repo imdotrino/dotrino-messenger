@@ -91,10 +91,10 @@ export async function resolveAccount () {
 function adoptLegacy (id) {
   for (const base of LEGACY_KEYS) {
     try {
-      const viejo = localStorage.getItem(base)
-      if (viejo == null) continue
-      const nuevo = `${base}::${id}`
-      if (localStorage.getItem(nuevo) == null) localStorage.setItem(nuevo, viejo)
+      const oldValue = localStorage.getItem(base)
+      if (oldValue == null) continue
+      const newKey = `${base}::${id}`
+      if (localStorage.getItem(newKey) == null) localStorage.setItem(newKey, oldValue)
       localStorage.removeItem(base)
     } catch (_) { /* cajón lleno o modo privado: se sigue */ }
   }

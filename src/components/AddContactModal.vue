@@ -50,12 +50,12 @@ const myLink = computed(() => {
 const scanOpen = ref(false)
 // En vuelo: el botón se apaga mientras se canjea, para que dos toques no manden
 // dos saludos (y para que se vea que está pasando algo).
-const enviando = ref(false)
+const sending = ref(false)
 
 // Mismo criterio que el proxio: se traduce lo que se confunde al leer o al
 // dictar. Solo se traduce lo que NUNCA se emite, para no romper un código bueno.
 const CONFUSABLES = { I: '1', L: '1', S: '5', Z: '2', B: '8', G: '6', 0: 'O' }
-const normalizar = (raw) => [...String(raw || '').toUpperCase()]
+const normalize = (raw) => [...String(raw || '').toUpperCase()]
   .filter((c) => c !== ' ' && c !== '-' && c !== '_')
   .map((c) => CONFUSABLES[c] ?? c)
   .join('')
@@ -70,7 +70,7 @@ const CODE_RE = /^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$/
 const codeFromScan = (text) => {
   const raw = String(text || '').trim()
   const m = raw.match(/[#&?]add=([^&\s]+)/i)
-  return normalizar(m ? m[1] : raw).slice(0, 6)
+  return normalize(m ? m[1] : raw).slice(0, 6)
 }
 
 const onScanned = async (ev) => {
@@ -84,7 +84,7 @@ const onScanned = async (ev) => {
 /** Solicitud a la llave del enlace `#to=`: no hay código que canjear. */
 const submitToPeer = async () => {
   errorKey.value = ''
-  enviando.value = true
+  sending.value = true
   try {
     await threads.sendContactRequest({ token: null, pubkey: props.peer.pubkey, alias: (nicknameInput.value || '').trim(), card: props.peer.card || null })
     emit('close')
@@ -92,14 +92,14 @@ const submitToPeer = async () => {
     console.warn('[cc-add-contact] contact request failed', e?.code || '', e?.message)
     errorKey.value = 'errSend'
   } finally {
-    enviando.value = false
+    sending.value = false
   }
 }
 
 const submit = async () => {
   if (props.peer) return submitToPeer()
   errorKey.value = ''
-  const code = normalizar(tokenInput.value)
+  const code = normalize(tokenInput.value)
   if (!CODE_RE.test(code)) {
     errorKey.value = 'errInvalid'
     return
@@ -111,7 +111,7 @@ const submit = async () => {
   // Canjear la cita da la instancia de esa persona (esté en el proxio que esté).
   // Antes se usaba el texto tecleado como si fuera la dirección: eso dejó de
   // funcionar cuando la dirección pasó a ser la instancia.
-  enviando.value = true
+  sending.value = true
   try {
     const res = await connection.redeemPairingCode(code)
     if (!res?.ok || !res.instance) {
@@ -136,7 +136,7 @@ const submit = async () => {
     console.warn('[cc-add-contact] contact request failed', e?.code || '', e?.message)
     errorKey.value = 'errSend'
   } finally {
-    enviando.value = false
+    sending.value = false
   }
 }
 
@@ -238,7 +238,7 @@ const pasteToken = async () => {
 
       <footer class="foot">
         <button class="btn secondary" @click="emit('close')">{{ t.add.cancel }}</button>
-        <button v-if="tab === 'add'" class="btn" data-testid="send-hello" :disabled="enviando" @click="submit">{{ enviando ? t.add.sending : t.add.send }}</button>
+        <button v-if="tab === 'add'" class="btn" data-testid="send-hello" :disabled="sending" @click="submit">{{ sending ? t.add.sending : t.add.send }}</button>
         <button v-else class="btn" @click="emit('close')">{{ t.add.done }}</button>
       </footer>
     </div>

@@ -12,15 +12,15 @@ import { test, expect, chromium } from '@playwright/test'
  *      sin chats— y encima le escribía ese nombre a la cuenta nueva, dejando dos
  *      cuentas con el mismo nombre y distinta llave.
  *
- *   npx playwright test tests/persistencia.spec.js                (contra producción)
+ *   npx playwright test tests/persistence.spec.js                (contra producción)
  *   SITE_URL=http://localhost:4173 npx playwright test            (contra un preview)
  */
 const SITE = process.env.SITE_URL || 'https://messenger.dotrino.com'
 const CODE_RE = /^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$/
-const ESPERA = 45_000
-const marca = Math.random().toString(36).slice(2, 6).toUpperCase()
+const WAIT = 45_000
+const runTag = Math.random().toString(36).slice(2, 6).toUpperCase()
 
-async function entrar (context, apodo) {
+async function enter (context, nickname) {
   const page = await context.newPage()
   await page.addInitScript(() => {
     for (const id of ['profile', 'token', 'add', 'share', 'contacts', 'compose']) {
@@ -29,8 +29,8 @@ async function entrar (context, apodo) {
   })
   await page.goto(SITE, { waitUntil: 'domcontentloaded' })
   const nick = page.getByTestId('nickname-input')
-  await nick.waitFor({ timeout: ESPERA })
-  await nick.fill(apodo)
+  await nick.waitFor({ timeout: WAIT })
+  await nick.fill(nickname)
   await page.getByTestId('nickname-submit').click()
   return page
 }
@@ -61,40 +61,40 @@ test('contactos y mensajes siguen ahí tras recargar y tras cerrar la pestaña',
   const ctxA = await browser.newContext()
   const ctxB = await browser.newContext()
   try {
-    const ana = await entrar(ctxA, `Per${marca}A`)
-    const beto = await entrar(ctxB, `Per${marca}B`)
+    const ana = await enter(ctxA, `Per${runTag}A`)
+    const beto = await enter(ctxB, `Per${runTag}B`)
 
     const chip = ana.getByTestId('my-code')
-    await chip.waitFor({ timeout: ESPERA })
-    await expect.poll(async () => (await chip.textContent()).trim(), { timeout: ESPERA }).toMatch(CODE_RE)
-    const codigo = (await chip.textContent()).trim()
+    await chip.waitFor({ timeout: WAIT })
+    await expect.poll(async () => (await chip.textContent()).trim(), { timeout: WAIT }).toMatch(CODE_RE)
+    const pairCode = (await chip.textContent()).trim()
 
     await beto.getByTestId('add-contact').click()
-    await beto.getByTestId('code-input').fill(codigo)
+    await beto.getByTestId('code-input').fill(pairCode)
     await beto.getByTestId('send-hello').click()
 
-    const aceptar = ana.getByTestId('accept-request').first()
-    await aceptar.waitFor({ timeout: ESPERA })
-    await aceptar.click()
+    const acceptBtn = ana.getByTestId('accept-request').first()
+    await acceptBtn.waitFor({ timeout: WAIT })
+    await acceptBtn.click()
 
     await ana.getByTestId('contact-item').first().click()
     await beto.getByTestId('contact-item').first().click()
-    const texto = `persistencia ${marca}`
-    await beto.getByTestId('composer-input').fill(texto)
+    const text = `persistencia ${runTag}`
+    await beto.getByTestId('composer-input').fill(text)
     await beto.getByTestId('send-message').click()
-    await expect(ana.getByTestId('msg-in').filter({ hasText: texto })).toBeVisible({ timeout: ESPERA })
+    await expect(ana.getByTestId('msg-in').filter({ hasText: text })).toBeVisible({ timeout: WAIT })
 
     // 1) recargar
     await ana.reload({ waitUntil: 'domcontentloaded' })
-    await ana.getByTestId('contact-item').first().click({ timeout: ESPERA })
-    await expect(ana.getByTestId('msg-in').filter({ hasText: texto })).toBeVisible({ timeout: ESPERA })
+    await ana.getByTestId('contact-item').first().click({ timeout: WAIT })
+    await expect(ana.getByTestId('msg-in').filter({ hasText: text })).toBeVisible({ timeout: WAIT })
 
     // 2) cerrar la pestaña y volver a entrar
     await ana.close()
     const ana2 = await ctxA.newPage()
     await ana2.goto(SITE, { waitUntil: 'domcontentloaded' })
-    await ana2.getByTestId('contact-item').first().click({ timeout: ESPERA })
-    await expect(ana2.getByTestId('msg-in').filter({ hasText: texto })).toBeVisible({ timeout: ESPERA })
+    await ana2.getByTestId('contact-item').first().click({ timeout: WAIT })
+    await expect(ana2.getByTestId('msg-in').filter({ hasText: text })).toBeVisible({ timeout: WAIT })
   } finally {
     await browser.close().catch(() => {})
   }
@@ -105,34 +105,34 @@ test('cambiar de cuenta no arrastra el nombre ni los chats de la anterior', asyn
   const browser = await chromium.launch()
   const ctx = await browser.newContext()
   try {
-    const apodo = `Cta${marca}`
-    const page = await entrar(ctx, apodo)
-    await expect(page.locator('.who')).toHaveText(`@${apodo}`, { timeout: ESPERA })
-    const primera = await vault(page, 'currentProfile')
+    const nickname = `Cta${runTag}`
+    const page = await enter(ctx, nickname)
+    await expect(page.locator('.who')).toHaveText(`@${nickname}`, { timeout: WAIT })
+    const firstProfile = await vault(page, 'currentProfile')
 
     // Nace una cuenta SIN nombre y queda activa: es lo que pasa al emparejar con una
     // bóveda, al adoptar un perfil, y también cuando a este aparato lo echan y el
     // arranque estrena otra en su lugar.
-    const nueva = await vault(page, 'createProfile', { name: '' })
-    expect(nueva.id).not.toBe(primera.id)
+    const newProfile = await vault(page, 'createProfile', { name: '' })
+    expect(newProfile.id).not.toBe(firstProfile.id)
 
     await page.reload({ waitUntil: 'domcontentloaded' })
 
     // La cuenta nueva no tiene apodo, así que la app lo PIDE. Antes estampaba el de la
     // cuenta anterior y seguía como si nada.
-    await expect(page.getByTestId('nickname-input')).toBeVisible({ timeout: ESPERA })
+    await expect(page.getByTestId('nickname-input')).toBeVisible({ timeout: WAIT })
 
     // Y no se lo escribió al vault: la cuenta nueva sigue sin nombre, no renombrada
     // con el de la vieja.
-    const perfiles = await vault(page, 'listProfiles')
-    const creada = perfiles.find(p => p.id === nueva.id)
-    expect(creada, 'la cuenta nueva tiene que seguir existiendo').toBeTruthy()
-    expect(creada.name, 'la cuenta nueva NO puede heredar el nombre de la anterior').not.toBe(apodo)
+    const profiles = await vault(page, 'listProfiles')
+    const createdProfile = profiles.find(p => p.id === newProfile.id)
+    expect(createdProfile, 'la cuenta nueva tiene que seguir existiendo').toBeTruthy()
+    expect(createdProfile.name, 'la cuenta nueva NO puede heredar el nombre de la anterior').not.toBe(nickname)
 
     // Al volver a la cuenta de antes, su apodo sigue siendo suyo.
-    await vault(page, 'switchProfile', { id: primera.id })
+    await vault(page, 'switchProfile', { id: firstProfile.id })
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await expect(page.locator('.who')).toHaveText(`@${apodo}`, { timeout: ESPERA })
+    await expect(page.locator('.who')).toHaveText(`@${nickname}`, { timeout: WAIT })
   } finally {
     await browser.close().catch(() => {})
   }

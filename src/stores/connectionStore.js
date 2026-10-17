@@ -289,8 +289,8 @@ export const useConnectionStore = defineStore('connection', () => {
       if (res?.ok && res.instance) return res
       return { ok: false, reason: 'invalid', error: res?.error }
     } catch (e) {
-      const roto = e?.code === 'NOT_CONNECTED' || e?.code === 'REQUEST_TIMEOUT'
-      return { ok: false, reason: roto ? 'offline' : 'invalid', error: e?.message }
+      const offline = e?.code === 'NOT_CONNECTED' || e?.code === 'REQUEST_TIMEOUT'
+      return { ok: false, reason: offline ? 'offline' : 'invalid', error: e?.message }
     }
   }
 
