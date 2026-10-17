@@ -44,7 +44,7 @@ android {
         applicationId = "com.dotrino.messenger"
         minSdk = 31
         targetSdk = 36
-        versionCode = 14
+        versionCode = 15
         versionName = "0.5.2"
     }
 
@@ -63,7 +63,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: quita lo que no se usa y renombra (Play mide la «ofuscación»). Las reglas de la
+            // librería vienen con dotrino-native (consumer-rules.pro).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             if (uploadKey != null) signingConfig = signingConfigs.getByName("release")
         }
     }
