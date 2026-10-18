@@ -65,61 +65,79 @@ test('SW: el handler de push desplegado dispara cc-push-ring', async () => {
   await browser.close()
 })
 
-// SKIP: depende del handshake de alta de contacto (HELLO), que usa los iframes
-// del vault + WebRTC y no completa de forma fiable en Chromium headless contra
-// prod (flaky, ajeno al push). La cola offline que el push complementa ya está
-// verificada a nivel proxy (tests de simple-websocket-proxy: encola + ringPush).
-// Para correrlo manualmente: SITE_URL=... npx playwright test -g "cola offline"
-// idealmente con headless:false y display.
-test.skip('cola offline: DM a un peer offline se entrega al reconectar', async () => {
-  test.setTimeout(120_000)
-  const browser = await chromium.launch({ headless: true })
-  const aliceCtx = await browser.newContext()
-  const bobCtx = await browser.newContext()
-  let alice = await aliceCtx.newPage()
-  let bob = await bobCtx.newPage()
+/**
+ * LA COLA OFFLINE que el push complementa: un texto a alguien desconectado espera en el
+ * proxio y le llega al volver a abrir la app. (La foto por la cola la cubre friends.spec.)
+ *
+ * Antes estaba en `test.skip` con selectores de la UI vieja (`.tok`, `.item`, `.bubble`):
+ * el alta de contacto ya completa en Chromium headless, así que corre con los `data-testid`
+ * de hoy.
+ */
+const WAIT = 45_000
+const runTag = Math.random().toString(36).slice(2, 6).toUpperCase()
 
-  await alice.goto(SITE)
-  await bob.goto(SITE)
-
-  // Nicknames (si aparece el modal).
-  for (const [page, nick] of [[alice, 'AlicePush'], [bob, 'BobPush']]) {
-    const input = page.locator('input[placeholder*="alice" i], input[placeholder*="ej." i]').first()
-    if (await input.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await input.fill(nick)
-      await page.getByRole('button', { name: /continuar/i }).first().click()
+async function enter (browser, nickname) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  // El tutorial tapa la UI con burbujas y no es lo que se prueba aquí.
+  await context.addInitScript(() => {
+    for (const id of ['profile', 'token', 'add', 'share', 'contacts', 'compose']) {
+      try { localStorage.setItem(`messenger.tutorial:seen:${id}`, '1') } catch (_) {}
     }
+  })
+  const page = await context.newPage()
+  await page.goto(SITE, { waitUntil: 'domcontentloaded' })
+  const nick = page.getByTestId('nickname-input')
+  await nick.waitFor({ timeout: WAIT })
+  await nick.fill(nickname)
+  await page.getByTestId('nickname-submit').click()
+  return { context, page }
+}
+
+test('cola offline: DM a un peer offline se entrega al reconectar', async () => {
+  test.setTimeout(180_000)
+  const browser = await chromium.launch()
+  const alice = await enter(browser, `Alice${runTag}`)
+  const bob = await enter(browser, `Bob${runTag}`)
+  try {
+    const chip = alice.page.getByTestId('my-code')
+    await chip.waitFor({ timeout: WAIT })
+    await expect.poll(async () => (await chip.textContent()).trim(), { timeout: WAIT })
+      .toMatch(/^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$/)
+    const aliceCode = (await chip.textContent()).trim()
+
+    // Bob añade a Alice por código → saludo, y Alice acepta la solicitud.
+    await bob.page.getByTestId('add-contact').click()
+    await bob.page.getByTestId('code-input').fill(aliceCode)
+    await bob.page.getByTestId('send-hello').click()
+    const ok = alice.page.getByTestId('accept-request').first()
+    await ok.waitFor({ timeout: WAIT })
+    await ok.click()
+    await alice.page.getByTestId('contact-item').first().click()
+    await bob.page.getByTestId('contact-item').first().click()
+
+    // Bob se va OFFLINE: se cierra su página (su WS se desconecta). El contexto
+    // (almacén e identidad) se conserva para reabrir como la misma persona.
+    await bob.page.close()
+    await expect(alice.page.getByTestId('route')).toHaveAttribute('data-route', 'offline', { timeout: WAIT })
+
+    // Alice le escribe a Bob desconectado → cae a la cola del proxio.
+    const message = `offline ${runTag} ${Date.now()}`
+    await alice.page.getByTestId('composer-input').fill(message)
+    await alice.page.getByTestId('send-message').click()
+    // El ✓ dice que el proxio ya lo tiene en la cola; antes de eso Bob no tiene nada que drenar.
+    await expect(alice.page.getByTestId('msg-out').filter({ hasText: message }).locator('.check'))
+      .toHaveText('✓', { timeout: WAIT })
+
+    // Bob reabre (mismo contexto) → reconecta, identify drena la cola.
+    bob.page = await bob.context.newPage()
+    await bob.page.goto(SITE, { waitUntil: 'domcontentloaded' })
+    const item = bob.page.getByTestId('contact-item').first()
+    await item.waitFor({ timeout: WAIT })
+    await item.click()
+    await expect(bob.page.getByTestId('msg-in').filter({ hasText: message })).toBeVisible({ timeout: WAIT })
+  } finally {
+    await alice.context.close().catch(() => {})
+    await bob.context.close().catch(() => {})
+    await browser.close().catch(() => {})
   }
-
-  const aliceTok = await alice.locator('.tok').first().innerText({ timeout: 30000 })
-  await bob.locator('.tok').first().innerText({ timeout: 30000 })
-
-  // Bob añade a Alice por token → handshake HELLO (ambos quedan como contacto).
-  await bob.locator('button.add-btn, button[title*="adir"]').first().click()
-  await bob.locator('input.mono, input[placeholder*="A4F2" i]').first().fill(aliceTok)
-  await bob.getByRole('button', { name: /enviar saludo/i }).click()
-  await expect(alice.locator('.item').first(), 'Alice no recibió el HELLO de Bob')
-    .toBeVisible({ timeout: 30000 })
-
-  // Bob se va OFFLINE: cerramos su página (su WS se desconecta). El contexto
-  // (storage/identidad) se conserva para reabrir como la misma persona.
-  await bob.close()
-  await alice.waitForTimeout(2000)
-
-  // Alice le manda un DM a Bob estando offline → cae a la cola offline del proxy.
-  const message = 'offline-' + Date.now()
-  await alice.locator('.item').first().click({ timeout: 5000 })
-  await alice.locator('textarea').fill(message)
-  await alice.locator('button.send').click()
-  await alice.waitForTimeout(3000)
-
-  // Bob reabre (mismo contexto) → reconecta, identify drena la cola.
-  bob = await bobCtx.newPage()
-  await bob.goto(SITE)
-  await bob.locator('.tok').first().innerText({ timeout: 30000 })
-  await bob.locator('.item').first().click({ timeout: 15000 })
-  await expect(bob.locator('.bubble', { hasText: message }))
-    .toBeVisible({ timeout: 30_000 })
-
-  await browser.close()
 })
