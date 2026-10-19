@@ -31,6 +31,9 @@ final class RoundTripUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap(); composer.typeText("hola desde ios")
         app.buttons["send-message"].tap()
-        XCTAssertTrue(app.staticTexts["hola ios, te leo desde la web"].waitForExistence(timeout: 120), "the web reply did not arrive")
+        if !app.staticTexts["hola ios, te leo desde la web"].waitForExistence(timeout: 120) {
+            print("SCREEN: " + app.debugDescription.replacingOccurrences(of: "\n", with: " ¶ "))
+            XCTFail("the web reply did not arrive")
+        }
     }
 }
