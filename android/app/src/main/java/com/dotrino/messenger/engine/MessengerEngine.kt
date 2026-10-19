@@ -455,7 +455,7 @@ class MessengerEngine(
         peerCompat = if (mark == null) peerCompat - pubkey else peerCompat + (pubkey to mark)
         (payload["card"] as? JsonObject)?.let { card ->
             val r = runCatching { peers.adoptPeerCard(card) }.getOrNull()
-            if (r != null && !r.adopted && r.reason == "master-cambiado") onWarn("the card of ${pubkey.take(24)} is signed by another device: not adopted silently", null)
+            if (r != null && !r.adopted && r.reason == "master-changed") onWarn("the card of ${pubkey.take(24)} is signed by another device: not adopted silently", null)
         }
     }
 

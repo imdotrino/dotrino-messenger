@@ -553,7 +553,7 @@ export const useThreadsStore = defineStore('threads', () => {
       try {
         const id = await getIdentity()
         const r = await id?.adoptPeerCard?.(payload.card)
-        if (r && !r.adopted && r.reason === 'master-cambiado') {
+        if (r && !r.adopted && r.reason === 'master-changed') {
           console.warn('[messenger] the card of %s is signed by another device: not adopted silently', pubkey.slice(0, 24))
         }
       } catch (e) { console.warn('adoptPeerCard:', e?.message || e) }
