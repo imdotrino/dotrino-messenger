@@ -17,7 +17,7 @@ settings:
     DEVELOPMENT_TEAM: P7G853375S
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: 0.5.2
-    CURRENT_PROJECT_VERSION: 6
+    CURRENT_PROJECT_VERSION: 7
 packages:
   DotrinoNative:
     path: ../native
@@ -52,6 +52,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIUserInterfaceStyle: Light
         NSCameraUsageDescription: "Para leer el código QR de la persona que quieres agregar."
+        # «Cerca» (añadir a quien está al lado) y el escalón Bluetooth del transporte.
+        NSBluetoothAlwaysUsageDescription: "Para encontrar a quien está cerca y quiere agregarte, y hablar directo con tus contactos cuando están al lado."
     entitlements:
       path: Messenger/Messenger.entitlements
       properties:

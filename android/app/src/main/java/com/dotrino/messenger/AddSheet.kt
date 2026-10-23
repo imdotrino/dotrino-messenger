@@ -11,12 +11,18 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.dotrino.messenger.engine.MessengerEngine
+import com.dotrino.sdk.BleWire
+import com.dotrino.sdk.Delegation
 import com.dotrino.sdk.ui.DotrinoQr
+import kotlinx.coroutines.Job
 
 /**
- * «Add contact»: two tabs, like the PWA. BY CODE: the other person's 6 characters (typed,
- * pasted or scanned) and an optional alias → a contact REQUEST. MY CODE: mine, and its QR (a
- * link, so a phone's camera opens the messenger with the code in place).
+ * «Add contact»: the two tabs of the PWA and one of the phone. BY CODE: the other person's 6
+ * characters (typed, pasted or scanned) and an optional alias → a contact REQUEST. MY CODE: mine,
+ * and its QR (a link, so a phone's camera opens the messenger with the code in place). NEARBY
+ * (only native: a browser cannot announce): while it is open, my contact card goes out over
+ * Bluetooth and the cards of whoever is near come in (`dotrino-vault/docs/pairing-protocol.md`
+ * §1.8); «Add» sends the same request as a link. Several at once is normal: no incident here.
  */
 class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code: String?, private val scan: () -> Unit, startTab: String = "add",
                /** From a `#to=` link (the feedback email): whom to ask, with no code. */
@@ -35,6 +41,94 @@ class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code
         render()
     }
 
+    /** The sheet closed: nothing stays announced. */
+    fun closed() = stopNearby()
+
+    // ---- nearby ----
+
+    private class Found(val card: BleWire.Contact, var state: String = "new")
+    private val found = LinkedHashMap<String, Found>()
+    private var nearbyError: String? = null
+    private var nearbyOn = false
+    private var unannounce: (() -> Unit)? = null
+    private var looking: Job? = null
+
+    /** On: announce my card and look, in rounds, until the tab or the sheet closes. */
+    private fun startNearby() {
+        if (nearbyOn) return
+        nearbyOn = true
+        nearbyError = null
+        a.withBluetooth { why ->
+            if (!nearbyOn) return@withBluetooth
+            if (why != null) { nearbyError = why; nearbyOn = false; if (tab == "nearby") render(); return@withBluetooth }
+            val bt = Messenger.bluetooth ?: return@withBluetooth
+            val me = Messenger.profile?.publickey ?: return@withBluetooth
+            try { unannounce = bt.announce(BleWire.KIND_CONTACT, BleWire.encodeContact(me, e.nickname)) }
+            catch (x: Exception) { android.util.Log.w("messenger", "nearby: announce", x); nearbyError = "nearbyUnavailable"; nearbyOn = false; render(); return@withBluetooth }
+            looking = a.launch {
+                val mine = e.contacts().mapNotNull { it["publickey"]?.let { k -> (k as? kotlinx.serialization.json.JsonPrimitive)?.content } }
+                while (nearbyOn) {
+                    try {
+                        bt.discover(BleWire.KIND_CONTACT, 6000) { data ->
+                            val c = BleWire.decodeContact(data) ?: return@discover
+                            if (Delegation.samePubkey(c.publickey, me)) return@discover
+                            a.runOnUiThread {
+                                if (found.keys.none { Delegation.samePubkey(it, c.publickey) }) {
+                                    found[c.publickey] = Found(c, if (mine.any { Delegation.samePubkey(it, c.publickey) }) "contact" else "new")
+                                    if (tab == "nearby" && dialog.isShowing) render()
+                                }
+                            }
+                        }
+                    } catch (x: Exception) { android.util.Log.w("messenger", "nearby: discover", x); kotlinx.coroutines.delay(1000) }
+                }
+            }
+            if (tab == "nearby") render()
+        }
+    }
+
+    private fun stopNearby() {
+        nearbyOn = false
+        unannounce?.invoke(); unannounce = null
+        looking?.cancel(); looking = null
+    }
+
+    private fun nearbyTab() {
+        body.add(a.label(t("native.nearbyInfo"), 14f, a.col(R.color.m_muted)), top = 16)
+        nearbyError?.let { body.add(a.label(t("native.$it"), 14f, a.col(R.color.m_danger)).apply { tag = "nearby-error" }, top = 12); return }
+        if (found.isEmpty()) {
+            body.add(a.label(t(if (nearbyOn) "native.nearbySearching" else "native.nearbyNone"), 14f).apply { tag = "nearby-searching" }, top = 16)
+            if (nearbyOn) body.add(a.label(t("native.nearbyNone"), 13f, a.col(R.color.m_muted)), top = 6)
+            return
+        }
+        for (f in found.values) body.add(LinearLayout(a).apply {
+            gravity = Gravity.CENTER_VERTICAL; tag = "nearby-item"
+            val name = f.card.nickname.ifEmpty { t("native.nearbyNoNick") }
+            addView(a.avatar(name, f.card.publickey, 40))
+            addView(a.label(name, 16f, bold = true).apply { setPadding(a.px(12), 0, a.px(8), 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            when (f.state) {
+                "contact" -> addView(a.label(t("native.nearbyContact"), 13f, a.col(R.color.m_muted)))
+                "sent" -> addView(a.label(t("native.nearbySent"), 13f, a.col(R.color.m_muted)))
+                "sending" -> addView(a.label(t("add.sending"), 13f, a.col(R.color.m_muted)))
+                else -> addView(a.pill(t("native.nearbyAdd"), filled = true) { addNearby(f) }.apply { tag = "nearby-add" })
+            }
+        }, top = 12)
+        detach(error); body.add(error, top = 10)
+    }
+
+    private fun addNearby(f: Found) {
+        error.visibility = View.GONE
+        f.state = "sending"; render()
+        a.launch {
+            try {
+                e.addByLink(f.card.publickey, f.card.nickname, null)
+                f.state = "sent"
+            } catch (x: MessengerEngine.EngineError) {
+                f.state = "new"; showError(if (x.code == "offline") "errOffline" else "errSend")
+            } catch (x: Exception) { android.util.Log.w("messenger", "request nearby", x); f.state = "new"; showError("errSend") }
+            if (dialog.isShowing && tab == "nearby") render()
+        }
+    }
+
     fun refresh() { if (tab == "mine") render() }
 
     /** What the scanner (or a photo) read: a code, or nothing usable. */
@@ -50,13 +144,14 @@ class AddSheet(private val a: MainActivity, private val e: MessengerEngine, code
         body.removeAllViews()
         body.add(LinearLayout(a).apply {
             background = rounded(a.col(R.color.m_card2), a.px(24)); setPadding(a.px(4), a.px(4), a.px(4), a.px(4))
-            for ((id, key) in listOf("add" to "add.tabAdd", "mine" to "add.tabMine")) addView(a.label(t(key), 14f, a.col(if (tab == id) R.color.m_text else R.color.m_muted), bold = tab == id).apply {
-                gravity = Gravity.CENTER; setPadding(0, a.px(9), 0, a.px(9)); tag = if (id == "mine") "share-my-token-tab" else "add-tab"
+            for ((id, key) in listOf("add" to "add.tabAdd", "mine" to "add.tabMine", "nearby" to "native.nearbyTab")) addView(a.label(t(key), 14f, a.col(if (tab == id) R.color.m_text else R.color.m_muted), bold = tab == id).apply {
+                gravity = Gravity.CENTER; setPadding(0, a.px(9), 0, a.px(9)); tag = when (id) { "mine" -> "share-my-token-tab"; "nearby" -> "nearby-tab"; else -> "add-tab" }
                 if (tab == id) background = rounded(a.col(R.color.m_card), a.px(20))
-                setOnClickListener { tab = id; render() }
+                setOnClickListener { if (id == "nearby" && tab != id) nearbyError = null; tab = id; render() }
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         })
-        if (tab == "add" && peer != null) toTab() else if (tab == "add") addTab() else mineTab()
+        if (tab != "nearby") stopNearby() else if (nearbyError == null) startNearby()
+        if (tab == "add" && peer != null) toTab() else if (tab == "add") addTab() else if (tab == "nearby") nearbyTab() else mineTab()
     }
 
     private fun detach(v: View) { (v.parent as? ViewGroup)?.removeView(v) }

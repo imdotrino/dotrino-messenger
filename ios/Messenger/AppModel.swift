@@ -1,6 +1,7 @@
 import DotrinoNative
 import DotrinoNativeUI
 import DotrinoNativeWebRTC
+import CoreBluetooth
 import Foundation
 import UIKit
 import UserNotifications
@@ -50,6 +51,11 @@ final class AppModel: ObservableObject {
 
     private(set) var engine: MessengerEngine?
     private var session: SealedSession?
+    private(set) var profile: Profile?
+    /// THE BLUETOOTH of the transport (step 3, after direct WebRTC) and of «Nearby». It is on only
+    /// while the app is on screen and the permission was given (`sceneActive`): on, the phone tells
+    /// whoever is near that a Dotrino device is there. The first `start()` asks for the permission.
+    let bluetooth = BluetoothDirect()
     private var refreshQueued = false
     private var backup: VaultBackup?
     private var backupTask: Task<Void, Never>?
@@ -85,7 +91,7 @@ final class AppModel: ObservableObject {
         do {
             let p = try Profile.fromPhone()
             let s = SealedSession(urls: Self.proxies, profile: p, app: "messenger")
-            s.useDirect(WebRTCDirect())
+            s.useDirect(DirectLadder(webrtc: WebRTCDirect(), bluetooth: bluetooth))
             let peers = PeerBook(storage: PeerBook.PhoneStorage(profile: p), profile: p)
             let account = (p.pid ?? "default").lowercased().replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
             let store = try DotrinoStore(app: "messenger-" + account)
@@ -108,7 +114,8 @@ final class AppModel: ObservableObject {
             if await !e.hasNickname, let n = p.name { await e.setNickname(n) }
             await e.start()
             s.start()
-            engine = e; session = s; booted = true; profileKey = p.profileId
+            engine = e; session = s; profile = p; booted = true; profileKey = p.profileId
+            sceneActive(true)
             topbarProfile = p.name == nil ? DotrinoTopbarProfile(name: await e.nickname, key: p.avatarSeed, avatar: p.avatar) : p.topbar
             if backup != nil {
                 backupLoop = Task { [weak self] in while !Task.isCancelled { self?.syncSoon(0); try? await Task.sleep(nanoseconds: 300_000_000_000) } }
@@ -129,10 +136,29 @@ final class AppModel: ObservableObject {
         await engine?.stop()
         session?.close()
         backupTask?.cancel(); backupLoop?.cancel()
-        engine = nil; session = nil; backup = nil; peersBackup = nil; booted = false; noProfile = false
+        bluetooth.stop()
+        engine = nil; session = nil; profile = nil; backup = nil; peersBackup = nil; booted = false; noProfile = false
         contacts = []; requests = []; messages = []; open = nil; code = nil; problem = nil
         profileKey = nil; topbarProfile = nil; nickname = nil; hasNickname = false
         await boot()
+    }
+
+    /// On screen and allowed: Bluetooth on. In the background: off (and it stops saying it is there).
+    func sceneActive(_ active: Bool) {
+        if active, engine != nil, CBManager.authorization == .allowedAlways { bluetooth.start() }
+        else if !active { bluetooth.stop() }
+    }
+
+    /// Bluetooth ready for «Nearby» (the first time, iOS asks). nil when it is serving, or the reason it is not.
+    func withBluetooth() async -> String? {
+        if CBManager.authorization == .denied || CBManager.authorization == .restricted { return "nearbyNoPermission" }
+        bluetooth.start()
+        for _ in 0..<300 {   // up to 30 s: the first time, the person is reading the permission
+            if bluetooth.available { return nil }
+            if CBManager.authorization == .denied { return "nearbyNoPermission" }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return CBManager.authorization == .allowedAlways ? "nearbyUnavailable" : "nearbyNoPermission"
     }
 
     func refreshSoon() {

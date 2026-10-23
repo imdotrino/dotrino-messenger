@@ -52,6 +52,8 @@ class MainActivity : Activity() {
         private const val REQ_CAMERA = 11
         private const val REQ_NOTIF = 12
         private const val REQ_PHOTO = 13
+        private const val REQ_BLUETOOTH = 14
+        private val BLUETOOTH = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
         private const val CODE_RE = "^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$"
         /** The same translation as the proxy: only what it never emits is mapped. */
         private val CONFUSABLES = mapOf('I' to '1', 'L' to '1', 'S' to '5', 'Z' to '2', 'B' to '8', 'G' to '6', '0' to 'O')
@@ -86,6 +88,7 @@ class MainActivity : Activity() {
     private var pendingCode: String? = null
     private var pendingPeer: LinkPeer? = null
     private lateinit var notify: Notify
+    private var onBluetoothAsked: ((String?) -> Unit)? = null
 
     override fun attachBaseContext(base: Context) = super.attachBaseContext(DotrinoLocale.wrap(base))
 
@@ -112,8 +115,30 @@ class MainActivity : Activity() {
     private fun codeIn(i: Intent?): String? = i?.data?.fragment?.let { f -> Regex("add=([^&]+)").find(f)?.groupValues?.get(1)?.let(::codeFrom) }
 
     override fun onSaveInstanceState(out: Bundle) { super.onSaveInstanceState(out); out.putString("open", open) }
-    override fun onResume() { super.onResume(); resumed = true; engine?.active = open; if (engine == null) boot() }
-    override fun onPause() { resumed = false; engine?.active = null; super.onPause() }
+    override fun onResume() { super.onResume(); resumed = true; engine?.active = open; if (engine == null) boot() else startBluetooth() }
+    override fun onPause() { resumed = false; engine?.active = null; Messenger.bluetooth?.stop(); super.onPause() }
+
+    // ---------- Bluetooth ----------
+
+    private fun bluetoothGranted() = BLUETOOTH.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+
+    /** On screen and allowed: the Bluetooth step of the transport is on. Off in the background (the phone stops saying it is there). */
+    private fun startBluetooth() { if (resumed && engine != null && bluetoothGranted()) Messenger.bluetooth?.start() }
+
+    /**
+     * Bluetooth ready for «Nearby»: asks for the permission the first time. [done] gets null when it
+     * is serving, or the reason it is not: `nearbyNoPermission` or `nearbyUnavailable` (off, or none).
+     */
+    fun withBluetooth(done: (String?) -> Unit) {
+        if (!bluetoothGranted()) { onBluetoothAsked = done; requestPermissions(BLUETOOTH, REQ_BLUETOOTH); return }
+        val bt = Messenger.bluetooth ?: return done("nearbyUnavailable")
+        bt.start()
+        scope.launch {
+            var waited = 0
+            while (!bt.available && waited < 3000) { kotlinx.coroutines.delay(100); waited += 100 }
+            done(if (bt.available) null else "nearbyUnavailable")
+        }
+    }
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
     @Deprecated("Activity without AndroidX: the back button still comes here")
@@ -141,6 +166,7 @@ class MainActivity : Activity() {
                     requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
                 }
                 render()
+                startBluetooth()
                 intent.getStringExtra(Notify.EXTRA_CONTACT)?.let { openConversation(it) }
                 pendingCode?.let { if (e.hasNickname) openAdd(it) }
                 pendingPeer?.let { if (e.hasNickname) openAdd(null, peer = it) }
@@ -366,7 +392,7 @@ class MainActivity : Activity() {
         addSheet?.first?.dismiss()
         val s = AddSheet(this, e, code, ::openScanner, if (mine) "mine" else "add", peer)
         addSheet = s.dialog to s
-        s.dialog.setOnDismissListener { if (addSheet?.second === s) addSheet = null }
+        s.dialog.setOnDismissListener { s.closed(); if (addSheet?.second === s) addSheet = null }
         s.dialog.show()
     }
 
@@ -427,6 +453,11 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_CAMERA) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openScanner() else pickPhoto()
+        }
+        if (requestCode == REQ_BLUETOOTH) {
+            val done = onBluetoothAsked ?: return
+            onBluetoothAsked = null
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) withBluetooth(done) else done("nearbyNoPermission")
         }
     }
 

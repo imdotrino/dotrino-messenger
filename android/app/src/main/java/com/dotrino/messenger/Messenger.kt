@@ -19,6 +19,8 @@ import com.dotrino.sdk.Profile
 import com.dotrino.sdk.Reputation
 import com.dotrino.sdk.SealedSession
 import com.dotrino.sdk.webrtc.WebRtcDirect
+import com.dotrino.sdk.BluetoothDirect
+import com.dotrino.sdk.DirectLadder
 
 /**
  * The messenger of this process: ONE per app, not per screen (turning the phone must not
@@ -33,6 +35,12 @@ object Messenger {
     @Volatile var engine: MessengerEngine? = null; private set
     @Volatile var session: SealedSession? = null; private set
     @Volatile var profile: Profile? = null; private set
+    /**
+     * THE BLUETOOTH of the transport (step 3, after direct WebRTC) and of «Nearby». It is on only
+     * while the app is on screen and has the permission ([MainActivity] starts and stops it): on,
+     * the phone tells whoever is near that a Dotrino device is there.
+     */
+    @Volatile var bluetooth: BluetoothDirect? = null; private set
     private var identity: PhoneIdentity? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var backupJob: Job? = null
@@ -57,7 +65,8 @@ object Messenger {
         val id = identity ?: PhoneIdentity(ctx).also { identity = it }
         val p = try { id.profile() } catch (e: Profile.ProfileError) { throw BootError(e.message ?: e.code, e.code) }
         val s = SealedSession(PROXIES, p, "messenger")
-        s.useDirect(WebRtcDirect(ctx).apply { onWarn = { w, e -> android.util.Log.w("messenger", "webrtc: $w", e) } })
+        val bt = bluetooth ?: BluetoothDirect(ctx).also { bluetooth = it }
+        s.useDirect(DirectLadder(WebRtcDirect(ctx).apply { onWarn = { w, e -> android.util.Log.w("messenger", "webrtc: $w", e) } }, bt))
         s.onWarn = { w, e -> android.util.Log.w("messenger", w, e) }
         val peers = id.peerBook(p)
         val prefs = ctx.getSharedPreferences("messenger." + (p.pid ?: "default"), Context.MODE_PRIVATE)
