@@ -56,6 +56,8 @@ final class AppModel: ObservableObject {
     /// while the app is on screen and the permission was given (`sceneActive`): on, the phone tells
     /// whoever is near that a Dotrino device is there. The first `start()` asks for the permission.
     let bluetooth = BluetoothDirect()
+    /// «Nearby» of the add sheet: the contact card over Bluetooth AND the local network (dotrino-native `Nearby`).
+    lazy var nearby = Nearby(bluetooth: bluetooth)
     private var refreshQueued = false
     private var backup: VaultBackup?
     private var backupTask: Task<Void, Never>?
@@ -149,16 +151,15 @@ final class AppModel: ObservableObject {
         else if !active { bluetooth.stop() }
     }
 
-    /// Bluetooth ready for «Nearby» (the first time, iOS asks). nil when it is serving, or the reason it is not.
-    func withBluetooth() async -> String? {
-        if CBManager.authorization == .denied || CBManager.authorization == .restricted { return "nearbyNoPermission" }
+    /// Bluetooth ready for «Nearby» (the first time, iOS asks). Without it, «Nearby» still looks on
+    /// the local network: nothing to say here.
+    func prepareBluetooth() async {
+        if CBManager.authorization == .denied || CBManager.authorization == .restricted { return }
         bluetooth.start()
         for _ in 0..<300 {   // up to 30 s: the first time, the person is reading the permission
-            if bluetooth.available { return nil }
-            if CBManager.authorization == .denied { return "nearbyNoPermission" }
+            if bluetooth.available || CBManager.authorization == .denied { return }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        return CBManager.authorization == .allowedAlways ? "nearbyUnavailable" : "nearbyNoPermission"
     }
 
     func refreshSoon() {
@@ -202,8 +203,6 @@ final class AppModel: ObservableObject {
     }
 
     func send(_ text: String) async throws { guard let pk = open else { return }; try await engine?.sendDM(pk, text) }
-    func addByCode(_ code: String, alias: String) async throws { try await engine?.addByCode(code, alias: alias) }
-    func addByLink(_ p: LinkPeer, alias: String) async throws { try await engine?.addByLink(pubkey: p.pubkey, alias: alias, card: p.card) }
     func canWrite(_ pk: String) async -> Bool { await engine?.canWrite(pk) ?? false }
     func isPinned(_ pk: String) -> Bool { engine?.isPinned(pk) ?? false }
     func accept(_ pk: String) async { await engine?.acceptRequest(pk) }

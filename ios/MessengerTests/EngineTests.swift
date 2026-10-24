@@ -4,7 +4,8 @@ import XCTest
 @testable import Messenger
 
 /// The messenger's rules with REAL engines and REAL sealing over an in-memory proxy. The same
-/// cases as `EngineTest.kt`.
+/// cases as `EngineTest.kt`. The friend requests on their own are tested in dotrino-native
+/// (`FriendsTests`); here, the conversation around them.
 final class EngineTests: XCTestCase {
     struct SoftKeys: DeviceKeys {
         let s = P256.Signing.PrivateKey(), e = P256.KeyAgreement.PrivateKey()
@@ -160,21 +161,6 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(keys(people), [owner.publickey])
         try await ana.engine.sendDM(owner.publickey, "a los dos")
         await until("both devices got it") { b1.phone.got.contains("DM") && b2.phone.got.contains("DM") }
-    }
-
-    func testALinkWithTheCardReachesEveryDevice() async throws {
-        let net = Net(), owner = SoftKeys(), k1 = SoftKeys(), k2 = SoftKeys()
-        let card = try cardFor(owner, k1, k2)
-        let ana = await Person(net, "Ana"), b1 = await Person(net, "Beto1", keys: k1, acta: acta(card)), b2 = await Person(net, "Beto2", keys: k2, acta: acta(card))
-        try await ana.engine.addByLink(pubkey: k1.publickey, alias: "Beto", card: card)
-        await until("both devices got the request") {
-            let r1 = await b1.engine.requests(), r2 = await b2.engine.requests()
-            return r1.contains { $0.dir == "in" } && r2.contains { $0.dir == "in" }
-        }
-        await b2.engine.acceptRequest(ana.pubkey)                // accepted on the OTHER device
-        await until("ana has beto by his account") { await self.keys(ana.people()) == [owner.publickey] }
-        let p = await ana.people()
-        XCTAssertEqual(p.first?["nickname"]?.string, "Beto")
     }
 
     func testAContactKeptByADeviceMovesToItsAccountWithItsThread() async throws {
