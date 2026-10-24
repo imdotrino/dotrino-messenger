@@ -1,9 +1,9 @@
 package com.dotrino.messenger
 
 import android.content.Context
-import com.dotrino.messenger.engine.Kv
+import com.dotrino.sdk.Kv
 import com.dotrino.messenger.engine.MessengerEngine
-import com.dotrino.messenger.engine.SessionTransport
+import com.dotrino.sdk.SessionTransport
 import com.dotrino.messenger.engine.MessengerThreads
 import com.dotrino.sdk.VaultBackup
 import kotlinx.coroutines.CoroutineScope

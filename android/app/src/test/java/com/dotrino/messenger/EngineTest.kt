@@ -1,10 +1,10 @@
 package com.dotrino.messenger
 
-import com.dotrino.messenger.engine.Kv
-import com.dotrino.messenger.engine.MemoryKv
 import com.dotrino.messenger.engine.MemoryThreads
 import com.dotrino.messenger.engine.MessengerEngine
-import com.dotrino.messenger.engine.Transport
+import com.dotrino.sdk.FriendsTransport
+import com.dotrino.sdk.Kv
+import com.dotrino.sdk.MemoryKv
 import com.dotrino.sdk.Crypto
 import com.dotrino.sdk.DeviceKeys
 import com.dotrino.sdk.IdentitySealing
@@ -36,9 +36,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 import javax.crypto.KeyAgreement
 
 /**
- * The messenger's rules, with REAL engines and REAL sealing over an in-memory proxy:
- * a request never touches a chat, nobody is a contact until accepted, strangers and forged
- * senders go nowhere.
+ * The messenger's rules, with REAL engines and REAL sealing over an in-memory proxy: a request
+ * never touches a chat, strangers and forged senders reach no conversation, Dotrino is fixed, and a
+ * contact is their account. The friend protocol itself is tested in dotrino-native (`FriendsTest`).
  */
 class EngineTest {
     private class SoftKeys : DeviceKeys {
@@ -61,7 +61,7 @@ class EngineTest {
         val codes = HashMap<String, String>()
         var codeTtl = 60_000L
         var codeCalls = 0
-        inner class Phone(val name: String, val keys: SoftKeys = SoftKeys(), acta: JsonObject? = null) : Transport {
+        inner class Phone(val name: String, val keys: SoftKeys = SoftKeys(), acta: JsonObject? = null) : FriendsTransport {
             val profile = Profile.of(keys, acta)
             /** Every payload type that reached this device, whoever it was for. */
             val got = CopyOnWriteArrayList<String>()
@@ -96,7 +96,9 @@ class EngineTest {
             override suspend fun whoIs(token: String) = pubkeyOfToken(token)
             override suspend fun requestPairingCode(): ProxyConnection.PairingCode {
                 codeCalls++
-                val c = "C" + name.uppercase().take(5).padEnd(5, 'X'); codes[c] = token
+                // A code of the proxy's alphabet (without the letters that are confused), one per person.
+                val alphabet = "123456789ACDEFHJKMNOPQRTUVWXY"
+                val c = (0 until 6).map { alphabet[Math.floorMod(name.hashCode() * 31 + it * 7, alphabet.length)] }.joinToString(""); codes[c] = token
                 return ProxyConnection.PairingCode(c, System.currentTimeMillis() + codeTtl)
             }
             override suspend fun redeemPairingCode(code: String) = codes.remove(code) ?: throw ProxyConnection.ProxyError("bad code", "pair-invalid")
@@ -125,7 +127,7 @@ class EngineTest {
     @Test fun aRequestIsControlNotChatAndAcceptMakesContactsOnBothSides() = runBlocking {
         val net = Net(); val ana = Person(net, "Ana"); val beto = Person(net, "Beto")
         until("ana has a code") { ana.engine.pairingCode != null }
-        beto.engine.addByCode(ana.engine.pairingCode!!, "Anita")
+        beto.engine.friends.requestByCode(ana.engine.pairingCode!!, "Anita")
 
         until("ana gets the request") { ana.engine.requests().any { it.dir == "in" && it.pubkey == beto.pubkey } }
         assertEquals("request", ana.notices.single().kind)
@@ -150,7 +152,7 @@ class EngineTest {
         // without its pubkey. The key that sealed it says which contact it is (it was dropped).
         val net = Net(); val ana = Person(net, "Ana"); val beto = Person(net, "Beto")
         until("ana has a code") { ana.engine.pairingCode != null }
-        beto.engine.addByCode(ana.engine.pairingCode!!, "Anita")
+        beto.engine.friends.requestByCode(ana.engine.pairingCode!!, "Anita")
         until("ana gets the request") { ana.engine.requests().any { it.dir == "in" } }
         ana.engine.acceptRequest(beto.pubkey)
         until("beto sees ana") { beto.people().isNotEmpty() }
@@ -165,17 +167,10 @@ class EngineTest {
         assertTrue(ana.threads.threads().isEmpty()); assertTrue(ana.engine.requests().isEmpty()); assertTrue(ana.notices.isEmpty())
     }
 
-    @Test fun anAcceptNobodyAskedForAddsNobody() = runBlocking {
-        val net = Net(); val ana = Person(net, "Ana"); val carla = Person(net, "Carla")
-        carla.phone.raw(ana.phone, buildJsonObject { put("type", "CONTACT_ACCEPT"); put("nickname", "Carla") })
-        delay(300)
-        assertTrue(ana.people().isEmpty())
-    }
-
     @Test fun aForgedSenderIsDropped() = runBlocking {
         val net = Net(); val ana = Person(net, "Ana"); val beto = Person(net, "Beto"); val eve = Person(net, "Eve")
         until("code") { ana.engine.pairingCode != null }
-        beto.engine.addByCode(ana.engine.pairingCode!!, "")
+        beto.engine.friends.requestByCode(ana.engine.pairingCode!!, "")
         until("request") { ana.engine.requests().isNotEmpty() }
         ana.engine.acceptRequest(beto.pubkey)
         until("contacts") { beto.people().isNotEmpty() }
@@ -183,26 +178,6 @@ class EngineTest {
         eve.phone.forge(ana.phone, beto.pubkey, buildJsonObject { put("type", "DM"); put("text", "soy beto"); put("mid", "f1"); put("ts", 1) })
         delay(300)
         assertTrue(ana.engine.thread(beto.pubkey).none { it["text"]!!.jsonPrimitive.content == "soy beto" })
-    }
-
-    @Test fun theCodeRenewsItselfAndNeverGoesEmpty() = runBlocking {
-        val net = Net(); net.codeTtl = 10_300   // renewed 5 s before it expires: ~5.3 s from now
-        val ana = Person(net, "Ana")
-        until("first code") { ana.engine.pairingCode != null }
-        val before = net.codeCalls
-        withTimeout(12_000) { while (net.codeCalls == before) delay(100) }
-        delay(300)
-        assertTrue("the renewal left the code empty", ana.engine.pairingCode != null)
-    }
-
-    @Test fun bothAskingIsBothAccepting() = runBlocking {
-        val net = Net(); val ana = Person(net, "Ana"); val beto = Person(net, "Beto")
-        until("codes") { ana.engine.pairingCode != null && beto.engine.pairingCode != null }
-        beto.engine.addByCode(ana.engine.pairingCode!!, "")
-        until("ana has the request") { ana.engine.requests().isNotEmpty() }
-        // Ana, instead of accepting, adds Beto by his code: that is accepting.
-        ana.engine.addByCode(beto.engine.pairingCode!!, "")
-        until("both are contacts") { ana.people().isNotEmpty() && beto.people().isNotEmpty() }
     }
 
     // ---------- by ACCOUNT, and the fixed Dotrino contact (PWA 0.5.0) ----------
@@ -236,7 +211,7 @@ class EngineTest {
         val ana = Person(net, "Ana", pinned = owner.publickey)
         val dotrino = Person(net, "Dotrino", d1, acta(cardFor(owner, d1)))
         // Dotrino answers an email: a request to the key that signed it (the #to= link).
-        dotrino.engine.addByLink(ana.pubkey, "Ana", null)
+        dotrino.engine.friends.request(ana.pubkey, "Ana")
         until("ana accepted it by herself") { dotrino.people().isNotEmpty() }
         assertTrue("never in the inbox", ana.engine.requests().isEmpty())
         assertTrue(ana.notices.none { it.kind == "request" })
@@ -251,7 +226,7 @@ class EngineTest {
         val card = cardFor(owner, k1, k2)
         val ana = Person(net, "Ana"); val b1 = Person(net, "Beto1", k1, acta(card)); val b2 = Person(net, "Beto2", k2, acta(card))
         until("ana has a code") { ana.engine.pairingCode != null }
-        b1.engine.addByCode(ana.engine.pairingCode!!, "")
+        b1.engine.friends.requestByCode(ana.engine.pairingCode!!, "")
         until("ana gets the request") { ana.engine.requests().any { it.dir == "in" } }
         assertEquals("kept by the account, not the device", owner.publickey, ana.engine.requests().single().pubkey)
         ana.engine.acceptRequest(owner.publickey)
@@ -259,18 +234,6 @@ class EngineTest {
         assertEquals(listOf(owner.publickey), ana.people().map(::key))
         ana.engine.sendDM(owner.publickey, "a los dos")
         until("both devices got it") { b1.phone.got.contains("DM") && b2.phone.got.contains("DM") }
-    }
-
-    @Test fun aLinkWithTheCardReachesEveryDevice() = runBlocking {
-        val net = Net(); val owner = SoftKeys(); val k1 = SoftKeys(); val k2 = SoftKeys()
-        val card = cardFor(owner, k1, k2)
-        val ana = Person(net, "Ana"); val b1 = Person(net, "Beto1", k1, acta(card)); val b2 = Person(net, "Beto2", k2, acta(card))
-        ana.engine.addByLink(k1.publickey, "Beto", card)
-        until("both devices got the request") { b1.engine.requests().any { it.dir == "in" } && b2.engine.requests().any { it.dir == "in" } }
-        assertEquals(owner.publickey, ana.engine.requests().single().pubkey)
-        b2.engine.acceptRequest(ana.pubkey)                      // accepted on the OTHER device
-        until("ana has beto by his account") { ana.people().map(::key) == listOf(owner.publickey) }
-        assertEquals("Beto", ana.people().single()["nickname"]!!.jsonPrimitive.content)
     }
 
     @Test fun aContactKeptByADeviceMovesToItsAccountWithItsThread() = runBlocking {
