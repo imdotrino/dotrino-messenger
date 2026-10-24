@@ -54,6 +54,8 @@ targets:
         NSCameraUsageDescription: "Para leer el código QR de la persona que quieres agregar."
         # «Cerca» (añadir a quien está al lado) y el escalón Bluetooth del transporte.
         NSBluetoothAlwaysUsageDescription: "Para encontrar a quien está cerca y quiere agregarte, y hablar directo con tus contactos cuando están al lado."
+        NSLocalNetworkUsageDescription: "Para encontrar en tu red a quien quiere agregarte, sin escribir ningún código."
+        NSBonjourServices: ["_dotrino._tcp"]
     entitlements:
       path: Messenger/Messenger.entitlements
       properties:

@@ -5,37 +5,14 @@ import SwiftUI
 
 /// The app: the nickname the first time; then the contacts (requests on top) and, from there,
 /// a conversation. SwiftUI, no WebView (CONVENCIONES §16.2).
-/// Whom a `#to=<key>&nick=…&card=…` link asks to add (the feedback email's, so Dotrino can
-/// answer): their key, the nickname, and their card if it came. The engine checks the card.
-struct LinkPeer: Identifiable {
-    let pubkey: String, nickname: String, card: JSON?
-    var id: String { pubkey }
-
-    static func from(_ fragment: String?) -> LinkPeer? {
-        guard let f = fragment else { return nil }
-        func param(_ k: String) -> String? {
-            f.split(separator: "&").first { $0.hasPrefix("\(k)=") }.map { String($0.dropFirst(k.count + 1)) }
-        }
-        func b64(_ s: String) -> Data? {
-            var t = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-            while t.count % 4 != 0 { t += "=" }
-            return Data(base64Encoded: t)
-        }
-        guard let raw = param("to").flatMap(b64), let pubkey = String(data: raw, encoding: .utf8), (try? JSON.parse(pubkey))?.object != nil else { return nil }
-        let nick = String((param("nick")?.removingPercentEncoding ?? "").prefix(40))
-        let card = param("card").flatMap(b64).flatMap { String(data: $0, encoding: .utf8) }.flatMap { try? JSON.parse($0) }.flatMap { $0.object != nil ? $0 : nil }
-        return LinkPeer(pubkey: pubkey, nickname: nick, card: card)
-    }
-}
-
 struct RootView: View {
     @StateObject private var m = AppModel()
     @ObservedObject private var lang = DotrinoLang.shared
     @Environment(\.scenePhase) private var scene
     @State private var addOpen = false
     @State private var incomingCode: String?
-    @State private var incomingPeer: LinkPeer?
-    @State private var addTab = "add"
+    @State private var incomingPeer: FriendLink?
+    @State private var addTab: AddFriendSheet.Tab = .add
     /// Creating or adopting the first profile, inside the app (DotrinoWebSheet).
     @State private var profileWeb: URL?
 
@@ -44,7 +21,7 @@ struct RootView: View {
             DotrinoTopbar(repo: "imdotrino/dotrino-messenger", brand: .init(name: "Messenger", image: Image("Brand")),
                           profile: m.topbarProfile, onProfileChanged: { Task { await m.reboot() } }) {
                 if let code = m.code {
-                    Button(code) { incomingCode = nil; addTab = "mine"; addOpen = true }
+                    Button(code) { incomingCode = nil; addTab = .mine; addOpen = true }
                         .font(.system(.footnote, design: .monospaced).bold()).foregroundColor(Palette.text)
                         .padding(.horizontal, 10).padding(.vertical, 6).background(Capsule().fill(Palette.card2))
                         .accessibilityLabel(t("topbar.copyCode")).accessibilityIdentifier("my-code")
@@ -62,13 +39,21 @@ struct RootView: View {
         .onChange(of: scene) { phase in if phase == .active { m.sceneActive(true) } else if phase == .background { m.sceneActive(false) } }
         .onOpenURL { url in
             // The QR link (https://messenger.dotrino.com/#add=CODE) opens with the code in place.
-            if let p = LinkPeer.from(url.fragment) { incomingCode = nil; incomingPeer = p; addOpen = true }
-            else if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = AddSheet.normalize(String(f[r.upperBound...])); addOpen = true }
+            if let p = FriendLink.from(url.fragment) { incomingCode = nil; incomingPeer = p; addOpen = true }
+            else if let f = url.fragment, let r = f.range(of: "add=") { incomingCode = Friends.normalizeCode(String(f[r.upperBound...])); addOpen = true }
         }
         .fullScreenCover(isPresented: Binding(get: { profileWeb != nil }, set: { if !$0 { profileWeb = nil } })) {
             if let u = profileWeb { DotrinoWebSheet(url: u) { profileWeb = nil; Task { await m.reboot() } } }
         }
-        .sheet(isPresented: $addOpen, onDismiss: { addTab = "add"; incomingPeer = nil }) { AddSheet(m: m, initial: incomingCode ?? "", tab: addTab, peer: incomingPeer).environmentObject(lang) }
+        .sheet(isPresented: $addOpen, onDismiss: { addTab = .add; incomingPeer = nil }) {
+            // La hoja de añadir es la del ecosistema (dotrino-native `AddFriendSheet`): código, mi código y «Cerca».
+            if let e = m.engine {
+                AddFriendSheet(friends: e.friends, nearby: m.nearby, me: m.profile?.publickey, shareBase: "https://messenger.dotrino.com/",
+                               initialCode: incomingCode ?? "", tab: addTab, peer: incomingPeer,
+                               prepareNearby: { await m.prepareBluetooth() })
+                    .onDisappear { Task { await m.refresh() } }
+            }
+        }
         .id(lang.code)
     }
 
@@ -294,225 +279,6 @@ struct ConversationView: View {
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(msg.mine ? Color.clear : Palette.line))
             .accessibilityIdentifier(msg.mine ? "msg-out" : "msg-in")
             if !msg.mine { Spacer(minLength: 48) }
-        }
-    }
-}
-
-/// «Add contact»: by code (typed, pasted, scanned) → a REQUEST; my code and its QR; and NEARBY
-/// (only native: a browser cannot announce): while it is open, my contact card goes out over
-/// Bluetooth and the cards of whoever is near come in (`dotrino-vault/docs/pairing-protocol.md`
-/// §1.8). «Add» sends the same request as a link. Several at once is normal: no incident here.
-struct AddSheet: View {
-    @ObservedObject var m: AppModel
-    @State var code: String
-    @State private var alias = ""
-    @State private var tab = "add"
-    @State private var error: String?
-    @State private var sending = false
-    @State private var scanning = false
-    @State private var photo: PhotosPickerItem?
-    @State private var nearby: [NearbyPerson] = []
-    @State private var nearbyError: String?
-    @State private var nearbyOn = false
-    @Environment(\.dismiss) private var dismiss
-    /// From a `#to=` link (the feedback email): whom to ask, with no code.
-    let peer: LinkPeer?
-
-    /// [tab] "mine" = straight to «My code» (the chip of the bar: to show mine, not type theirs).
-    init(m: AppModel, initial: String, tab: String = "add", peer: LinkPeer? = nil) {
-        self.m = m; self.peer = peer
-        _code = State(initialValue: initial); _tab = State(initialValue: tab); _alias = State(initialValue: peer?.nickname ?? "")
-    }
-
-    private static let confusables: [Character: Character] = ["I": "1", "L": "1", "S": "5", "Z": "2", "B": "8", "G": "6", "0": "O"]
-    static func normalize(_ raw: String) -> String {
-        String(raw.uppercased().filter { $0 != " " && $0 != "-" && $0 != "_" }.map { confusables[$0] ?? $0 })
-    }
-    static func codeFrom(_ text: String) -> String {
-        if let r = text.range(of: #"[#&?]add=([^&\s]+)"#, options: [.regularExpression, .caseInsensitive]) {
-            return String(normalize(String(text[r].split(separator: "=", maxSplits: 1)[1])).prefix(6))
-        }
-        return String(normalize(text).prefix(6))
-    }
-    static let valid = #"^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$"#
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("", selection: $tab) {
-                        Text(t("add.tabAdd")).tag("add")
-                        Text(t("add.tabMine")).tag("mine")
-                        Text(t("native.nearbyTab")).tag("nearby")
-                    }.pickerStyle(.segmented)
-                    if tab == "add", peer != nil { toTab } else if tab == "add" { addTab } else if tab == "nearby" { nearbyTab } else { mineTab }
-                }.padding(20)
-            }
-            // Announce and look only while «Nearby» is on screen: the task ends with the tab or the sheet.
-            .task(id: tab) { if tab == "nearby" { await runNearby() } }
-            .navigationTitle(t("add.title")).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(t("add.cancel")) { dismiss() } } }
-        }
-        .fullScreenCover(isPresented: $scanning) {
-            ZStack(alignment: .bottom) {
-                DotrinoQRScanner(onResult: { text in scanning = false; scanned(text) },
-                                 onError: { _ in scanning = false; error = t("native.cameraDenied") }).ignoresSafeArea()
-                Button(t("add.close")) { scanning = false }.buttonStyle(Pill()).padding(.bottom, 40)
-            }
-        }
-        .onChange(of: photo) { item in
-            Task {
-                guard let data = try? await item?.loadTransferable(type: Data.self), let img = UIImage(data: data) else { return }
-                if let text = DotrinoQR.decode(img) { scanned(text) } else { error = t("add.errNoCode") }
-            }
-        }
-    }
-
-    private func scanned(_ text: String) {
-        let c = Self.codeFrom(text)
-        guard c.range(of: Self.valid, options: .regularExpression) != nil else { error = t("add.errNoCode"); return }
-        code = c; submit()
-    }
-
-    @ViewBuilder private var addTab: some View {
-        Text(t("add.info")).font(.subheadline).foregroundColor(Palette.muted)
-        Text(t("add.fieldToken")).font(.footnote.bold()).foregroundColor(Palette.muted)
-        HStack {
-            TextField(t("add.phToken"), text: $code).font(.system(.title3, design: .monospaced)).multilineTextAlignment(.center)
-                .textInputAutocapitalization(.characters).autocorrectionDisabled().padding(12)
-                .background(RoundedRectangle(cornerRadius: 16).stroke(Palette.line2)).accessibilityIdentifier("code-input")
-            Button(t("add.paste")) { if let s = UIPasteboard.general.string { code = Self.codeFrom(s) } }.buttonStyle(Pill())
-        }
-        HStack {
-            Button(t("add.scan")) { scanning = true }.buttonStyle(Pill()).accessibilityIdentifier("scan-qr")
-            PhotosPicker(selection: $photo, matching: .images) { Text(t("native.pickPhoto")) }.buttonStyle(Pill())
-        }
-        Text(t("add.fieldAlias")).font(.footnote.bold()).foregroundColor(Palette.muted)
-        TextField(t("add.phAlias"), text: $alias).padding(12).background(RoundedRectangle(cornerRadius: 16).stroke(Palette.line2))
-        if let error { Text(error).font(.subheadline).foregroundColor(Palette.danger) }
-        Text(t("add.hint")).font(.footnote).foregroundColor(Palette.muted)
-        Button(sending ? t("add.sending") : t("add.send")) { submit() }.buttonStyle(Pill(filled: true))
-            .frame(maxWidth: .infinity).disabled(sending).accessibilityIdentifier("send-hello")
-    }
-
-    /// A request to the key of a link: who it goes to, the alias, and «send».
-    @ViewBuilder private var toTab: some View {
-        let nick = (peer?.nickname).flatMap { $0.isEmpty ? nil : $0 } ?? t("add.toNoNick")
-        Text(t("add.toInfo").replacingOccurrences(of: "{nick}", with: nick)).font(.subheadline).foregroundColor(Palette.muted).accessibilityIdentifier("to-info")
-        Text(t("add.fieldAlias")).font(.footnote.bold()).foregroundColor(Palette.muted)
-        TextField(t("add.phAlias"), text: $alias).padding(12).background(RoundedRectangle(cornerRadius: 16).stroke(Palette.line2))
-        if let error { Text(error).font(.subheadline).foregroundColor(Palette.danger) }
-        Text(t("add.hint")).font(.footnote).foregroundColor(Palette.muted)
-        Button(sending ? t("add.sending") : t("add.send")) { submitToPeer() }.buttonStyle(Pill(filled: true))
-            .frame(maxWidth: .infinity).disabled(sending).accessibilityIdentifier("send-hello")
-    }
-
-    private func submitToPeer() {
-        guard let p = peer else { return }
-        error = nil; sending = true
-        Task {
-            do { try await m.addByLink(p, alias: alias); dismiss() }
-            catch let e as MessengerEngine.EngineError { error = t(e.code == "offline" ? "add.errOffline" : "add.errSend") }
-            catch { self.error = t("add.errSend") }
-            sending = false
-        }
-    }
-
-    struct NearbyPerson: Identifiable, Equatable {
-        var id: String { card.publickey }
-        let card: BleWire.Contact
-        var state: String   // new, sending, sent, contact
-    }
-
-    private func runNearby() async {
-        nearbyError = nil
-        nearbyOn = true
-        defer { nearbyOn = false }
-        if let why = await m.withBluetooth() { nearbyError = why; return }
-        guard let me = m.profile?.publickey, let e = m.engine else { return }
-        let stop: () -> Void
-        do { stop = try m.bluetooth.announce(kind: BleWire.kindContact, data: try BleWire.encodeContact(publickey: me, nickname: await e.nickname)) }
-        catch { print("messenger: nearby announce:", error); nearbyError = "nearbyUnavailable"; return }
-        defer { stop() }
-        let mine = await e.contacts().compactMap { $0["publickey"]?.string }
-        while !Task.isCancelled {
-            do { _ = try await m.bluetooth.discover(kind: BleWire.kindContact, timeout: 6) { data in
-                guard let c = BleWire.decodeContact(data), !Delegation.samePubkey(c.publickey, me) else { return }
-                Task { @MainActor in
-                    guard !nearby.contains(where: { Delegation.samePubkey($0.card.publickey, c.publickey) }) else { return }
-                    nearby.append(NearbyPerson(card: c, state: mine.contains { Delegation.samePubkey($0, c.publickey) } ? "contact" : "new"))
-                }
-            } } catch { print("messenger: nearby discover:", error); try? await Task.sleep(nanoseconds: 1_000_000_000) }
-        }
-    }
-
-    @ViewBuilder private var nearbyTab: some View {
-        Text(t("native.nearbyInfo")).font(.subheadline).foregroundColor(Palette.muted)
-        if let nearbyError {
-            Text(t("native.\(nearbyError)")).font(.subheadline).foregroundColor(Palette.danger).accessibilityIdentifier("nearby-error")
-        } else if nearby.isEmpty {
-            Text(t(nearbyOn ? "native.nearbySearching" : "native.nearbyNone")).font(.subheadline).accessibilityIdentifier("nearby-searching")
-            if nearbyOn { Text(t("native.nearbyNone")).font(.footnote).foregroundColor(Palette.muted) }
-        } else {
-            ForEach(nearby) { p in
-                let name = p.card.nickname.isEmpty ? t("native.nearbyNoNick") : p.card.nickname
-                HStack(spacing: 12) {
-                    Avatar(name: name, key: p.card.publickey, size: 40)
-                    Text(name).font(.body.bold()).frame(maxWidth: .infinity, alignment: .leading)
-                    switch p.state {
-                    case "contact": Text(t("native.nearbyContact")).font(.footnote).foregroundColor(Palette.muted)
-                    case "sent": Text(t("native.nearbySent")).font(.footnote).foregroundColor(Palette.muted)
-                    case "sending": Text(t("add.sending")).font(.footnote).foregroundColor(Palette.muted)
-                    default: Button(t("native.nearbyAdd")) { addNearby(p) }.buttonStyle(Pill(filled: true)).accessibilityIdentifier("nearby-add")
-                    }
-                }.accessibilityIdentifier("nearby-item")
-            }
-            if let error { Text(error).font(.subheadline).foregroundColor(Palette.danger) }
-        }
-    }
-
-    private func setState(_ p: NearbyPerson, _ s: String) {
-        if let i = nearby.firstIndex(where: { $0.id == p.id }) { nearby[i].state = s }
-    }
-
-    private func addNearby(_ p: NearbyPerson) {
-        error = nil
-        setState(p, "sending")
-        Task {
-            do {
-                try await m.addByLink(LinkPeer(pubkey: p.card.publickey, nickname: p.card.nickname, card: nil), alias: p.card.nickname)
-                setState(p, "sent")
-            } catch let e as MessengerEngine.EngineError {
-                setState(p, "new"); error = t(e.code == "offline" ? "add.errOffline" : "add.errSend")
-            } catch { setState(p, "new"); self.error = t("add.errSend") }
-        }
-    }
-
-    @ViewBuilder private var mineTab: some View {
-        Text(t("add.mineInfo")).font(.subheadline).foregroundColor(Palette.muted)
-        HStack {
-            Text(m.code ?? "…").font(.system(size: 28, weight: .bold, design: .monospaced)).kerning(4).accessibilityIdentifier("my-pairing-code")
-            Spacer()
-            Button(t("add.copy")) { UIPasteboard.general.string = m.code }.buttonStyle(Pill()).disabled(m.code == nil)
-        }
-        if let c = m.code {
-            DotrinoQRView("https://messenger.dotrino.com/#add=\(c)", size: 220).frame(maxWidth: .infinity).accessibilityIdentifier("my-qr")
-            Text(t("add.qrHint")).font(.footnote).foregroundColor(Palette.muted).frame(maxWidth: .infinity)
-        }
-    }
-
-    private func submit() {
-        error = nil
-        let c = Self.normalize(code)
-        guard c.range(of: Self.valid, options: .regularExpression) != nil else { error = t("add.errInvalid"); return }
-        sending = true
-        Task {
-            do { try await m.addByCode(c, alias: alias); dismiss() }
-            catch let e as MessengerEngine.EngineError {
-                // «Offline» and «not valid» are fixed differently: say which.
-                error = t(["own": "add.errOwn", "offline": "add.errOffline", "invalid": "add.errInvalid"][e.code] ?? "add.errSend")
-            } catch { self.error = t("add.errSend") }
-            sending = false
         }
     }
 }
