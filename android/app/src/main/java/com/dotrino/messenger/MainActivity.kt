@@ -25,6 +25,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.dotrino.messenger.engine.MessengerEngine
 import com.dotrino.sdk.ui.DotrinoQr
+import com.dotrino.sdk.ui.AddFriendSheet
+import com.dotrino.sdk.Friends
+import com.dotrino.sdk.Nearby
 import com.dotrino.sdk.ui.DotrinoTopbar
 import com.dotrino.sdk.ui.DotrinoLocale
 import com.dotrino.sdk.ui.IdentityRequired
@@ -45,24 +48,17 @@ import java.util.Locale
  * a conversation returns to the list; from the list, leaves. Plain native views.
  */
 class MainActivity : Activity() {
-    /** Whom a `#to=` link asks to add: their key, the nickname, and their card if it came. */
-    data class LinkPeer(val pubkey: String, val nickname: String, val card: kotlinx.serialization.json.JsonObject?)
-
     companion object {
         private const val REQ_CAMERA = 11
         private const val REQ_NOTIF = 12
         private const val REQ_PHOTO = 13
         private const val REQ_BLUETOOTH = 14
         private val BLUETOOTH = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
-        private const val CODE_RE = "^[1-9ACDEFHJKMNOPQRTUVWXY]{6}$"
-        /** The same translation as the proxy: only what it never emits is mapped. */
-        private val CONFUSABLES = mapOf('I' to '1', 'L' to '1', 'S' to '5', 'Z' to '2', 'B' to '8', 'G' to '6', '0' to 'O')
-        fun normalize(raw: String) = raw.uppercase().filter { it != ' ' && it != '-' && it != '_' }.map { CONFUSABLES[it] ?: it }.joinToString("")
         /**
          * `#to=<key>&nick=…&card=…`: the feedback email's link so Dotrino can answer. The key and the
          * card go in base64url; the card is checked by the engine (its profile signed it).
          */
-        fun peerFrom(fragment: String?): LinkPeer? {
+        fun peerFrom(fragment: String?): AddFriendSheet.Peer? {
             val f = fragment ?: return null
             fun param(k: String) = Regex("(?:^|&)$k=([^&]+)").find(f)?.groupValues?.get(1)
             fun b64(s: String) = String(android.util.Base64.decode(s, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
@@ -70,9 +66,8 @@ class MainActivity : Activity() {
             if (runCatching { kotlinx.serialization.json.Json.parseToJsonElement(pubkey) }.isFailure) return null
             val nick = param("nick")?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.take(40) ?: ""
             val card = param("card")?.let { c -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(b64(c)) as? kotlinx.serialization.json.JsonObject }.getOrNull() }
-            return LinkPeer(pubkey, nick, card)
+            return AddFriendSheet.Peer(pubkey, nick, card)
         }
-        fun codeFrom(text: String): String = normalize(Regex("[#&?]add=([^&\\s]+)", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1) ?: text).take(6)
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -83,10 +78,10 @@ class MainActivity : Activity() {
     private var status: TextView? = null
     private var rerenderQueued = false
     private var resumed = false
-    private var addSheet: Pair<Dialog, AddSheet>? = null
+    private var addSheet: AddFriendSheet? = null
     private var scanDialog: Dialog? = null
     private var pendingCode: String? = null
-    private var pendingPeer: LinkPeer? = null
+    private var pendingPeer: AddFriendSheet.Peer? = null
     private lateinit var notify: Notify
     private var onBluetoothAsked: ((String?) -> Unit)? = null
 
@@ -112,7 +107,7 @@ class MainActivity : Activity() {
         intent.getStringExtra(Notify.EXTRA_CONTACT)?.let { openConversation(it) }
     }
 
-    private fun codeIn(i: Intent?): String? = i?.data?.fragment?.let { f -> Regex("add=([^&]+)").find(f)?.groupValues?.get(1)?.let(::codeFrom) }
+    private fun codeIn(i: Intent?): String? = i?.data?.fragment?.let { f -> Regex("add=([^&]+)").find(f)?.groupValues?.get(1)?.let(Friends::codeFromText) }
 
     override fun onSaveInstanceState(out: Bundle) { super.onSaveInstanceState(out); out.putString("open", open) }
     override fun onResume() { super.onResume(); resumed = true; engine?.active = open; if (engine == null) boot() else startBluetooth() }
@@ -259,7 +254,7 @@ class MainActivity : Activity() {
             }
             c.removeAllViews()
             c.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addSheet?.second?.refresh()
+            addSheet?.refresh()
         }
     }
 
@@ -318,7 +313,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun requestRow(e: MessengerEngine, r: MessengerEngine.Request, incoming: Boolean) = LinearLayout(this).apply {
+    private fun requestRow(e: MessengerEngine, r: Friends.Request, incoming: Boolean) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         tag = if (incoming) "request-in" else "sent-request"
         val name = r.nickname.ifEmpty { r.pubkey.take(8) + "…" }
@@ -384,16 +379,25 @@ class MainActivity : Activity() {
 
     private fun closeConversation() { open = null; engine?.active = null; render() }
 
-    /** «Add contact»; [mine] = straight to «My code» (the chip of the bar: to show mine, not type theirs). */
-    private fun openAdd(code: String?, mine: Boolean = false, peer: LinkPeer? = null) {
+    /**
+     * «Add contact», the ecosystem's sheet (dotrino-native `AddFriendSheet`); [mine] = straight to
+     * «My code» (the chip of the bar: to show mine, not type theirs). «Nearby» goes over Bluetooth
+     * when it is allowed and on, and over the local network always.
+     */
+    private fun openAdd(code: String?, mine: Boolean = false, peer: AddFriendSheet.Peer? = null) {
         val e = engine ?: return
         pendingCode = null
         pendingPeer = null
-        addSheet?.first?.dismiss()
-        val s = AddSheet(this, e, code, ::openScanner, if (mine) "mine" else "add", peer)
-        addSheet = s.dialog to s
-        s.dialog.setOnDismissListener { s.closed(); if (addSheet?.second === s) addSheet = null }
-        s.dialog.show()
+        addSheet?.dialog?.dismiss()
+        val s = AddFriendSheet(this, e.friends, scope, "https://messenger.dotrino.com/", code,
+            if (mine) AddFriendSheet.TAB_MINE else AddFriendSheet.TAB_CODE, peer, ::openScanner,
+            nearby = { on -> Nearby(this, if (on) Messenger.bluetooth else null) },
+            prepareBluetooth = { done -> withBluetooth { why -> done(why == null) } },
+            palette = AddFriendSheet.Palette(col(R.color.m_card), col(R.color.m_card2), col(R.color.m_text), col(R.color.m_muted),
+                col(R.color.m_line2), col(R.color.m_accent), col(R.color.m_on_accent), col(R.color.m_danger)))
+        addSheet = s
+        s.onClosed = { if (addSheet === s) addSheet = null }
+        s.show()
     }
 
     private fun openRate(pk: String) {
@@ -434,10 +438,7 @@ class MainActivity : Activity() {
         startActivityForResult(Intent(MediaStore.ACTION_PICK_IMAGES).apply { type = "image/*" }, REQ_PHOTO)
     }
 
-    private fun onScanned(text: String) {
-        val code = codeFrom(text)
-        addSheet?.second?.scanned(if (Regex(CODE_RE).matches(code)) code else null)
-    }
+    private fun onScanned(text: String) { addSheet?.scanned(text) }
 
     @Deprecated("Activity without AndroidX")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -446,7 +447,7 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         val bmp = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return
         val text = DotrinoQr.decode(bmp)
-        if (text == null) addSheet?.second?.scanned(null) else onScanned(text)
+        addSheet?.scanned(text)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
