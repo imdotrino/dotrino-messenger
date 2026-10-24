@@ -16,7 +16,10 @@ Lo que se afirma tiene que estar en la app publicada. No se promete nada que no 
 | Precio | Android $1, iOS $5 (pago único; MODELO-NEGOCIO.md). Sin compras dentro de la app |
 | Anuncios | No |
 | Correo de contacto | info@dotrino.com |
-| Sitio web | https://messenger.dotrino.com/ |
+| Sitio web (Marketing URL) | https://messenger.dotrino.com/ |
+| Soporte (es) | https://wiki.dotrino.com/apps/mensajeria/ |
+| Soporte (en) | https://wiki.dotrino.com/en/apps/mensajeria/ |
+| App Store Connect | app `6819512068`, idioma principal Español (México) + English (U.S.) |
 | Política de privacidad (es) | https://wiki.dotrino.com/empezar/politica-de-privacidad/ |
 | Política de privacidad (en) | https://wiki.dotrino.com/en/empezar/politica-de-privacidad/ |
 | Derechos (App Store) | 2026 DOTRINO S.A.S. |
