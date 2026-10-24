@@ -1,16 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref, computed, markRaw } from 'vue'
-import { samePubkey } from '@dotrino/proxy-client'
 import { useConnectionStore } from './connectionStore'
 import { useContactsStore } from './contactsStore'
 import { useRequestsStore } from './requestsStore'
+import { getFriends, hooks as friendHooks } from '../services/friends'
 import { shouldNotifyKind } from '../services/notifications'
 import { getIdentity } from '../services/identity'
 import { getStore, onVaultChanged } from '../services/store'
 import { getReputation } from '../services/reputation'
 import { sanitizeMessage, sanitizeNickname } from '../utils/sanitize'
 import { key as accountKey } from '../services/account'
-import { MINE as MY_VERSION, checkPeer } from '../services/compat'
+import { checkPeer } from '../services/compat'
 import { readFile, validIncomingFile, toBase64 } from '../utils/file'
 
 // LOS BYTES DE LOS ARCHIVOS van en su propio hilo del almacén (`file:<contacto>`). En el
@@ -22,22 +22,11 @@ import { readFile, validIncomingFile, toBase64 } from '../utils/file'
 const FILE_PREFIX = 'file:'
 const fileKey = (pubkey) => FILE_PREFIX + pubkey
 const FILE_PIECE = 384 * 1024
-// Del mejor camino al peor, para decir por dónde va un contacto con varios aparatos.
-const ROUTE_ORDER = ['socket', 'direct', 'turn', 'webrtc', 'proxy', 'offline']
 
 // Contactos a los que ya contestamos el saludo esta sesión (por token). Evita la
 // "tormenta de HELLO": un saludo de respuesta es a su vez un saludo, y dos contactos en
 // línea entraban en ping-pong. Los tokens son de una conexión: al reconectar, se re-saluda.
 const greetedTokens = new Set()
-// Token vivo de cada APARATO (llave → token) de esta sesión. Un contacto puede tener
-// varios aparatos encendidos a la vez, y a cada uno se le escribe por su camino más
-// directo (§ transporte): por token si está en línea, por llave si no.
-const deviceTokens = new Map()
-// Tokens a los que ya les dijimos quiénes somos (el saludo del transporte, `helloTo`).
-// Quien recibe por token solo sabe de quién viene si alguna punta saludó: con una solicitud
-// que llegó por llave (el enlace #to=), nadie lo había hecho, y la respuesta se descartaba.
-const transportGreeted = new Set()
-
 // "Avalado por tu red": alguien en quien confías (directo/transitivo) tiene una
 // atestación sobre este pubkey. Si sí → la solicitud notifica; si no → silenciosa.
 async function isVouched (pubkey) {
@@ -94,9 +83,7 @@ function mergeThreads (local, remote) {
  * (`requireSealed`, CONVENCIONES §4.1): the proxy sees neither the type nor the content.
  * Nothing goes in the clear, not even the greeting.
  *
- *   CONTACT_REQUEST { nickname, v, card? }   "I want to add you" — goes to the other side's
- *                                            requests inbox, NEVER to a chat
- *   CONTACT_ACCEPT  { nickname, v, card? }   "accepted" — only counts if I asked first
+ *   CONTACT_REQUEST / CONTACT_ACCEPT          friend requests: handled by @dotrino/profile/friends
  *   HELLO           { nickname, v, card? }   presence between contacts (token + nickname)
  *   DM              { text, ts, mid, file? }  a chat message — only from a contact. `file` is
  *                                            { name, mime, data (base64), w, h }, sent as is;
@@ -105,15 +92,14 @@ function mergeThreads (local, remote) {
  *   RATING_QUERY    { queryId, subject }
  *   RATING_REPLY    { queryId, subject, mine, endorsements }
  *
- * WHO WROTE IT is said by the key that sealed it (`meta.senderEncPub`): only the holder of
- * that private key could build the envelope. It is checked against the contact's known
- * keys, or against the encryption key that identity announced SIGNED (`encPubOf`). The
- * token says nothing and the transport greeting does not authenticate.
+ * WHO WROTE IT is decided by @dotrino/profile/friends (`receive`): the key that sealed it has to be
+ * one of the contact's, or the one that identity announced signed.
  */
 export const useThreadsStore = defineStore('threads', () => {
   const connection = useConnectionStore()
   const contacts = useContactsStore()
   const requests = useRequestsStore()
+  const friends = getFriends()
 
   // Dispara la notificación in-app (App.vue observa lastIncomingDM) respetando
   // las preferencias del panel compartido. `kind`: 'message' | 'hello'.
@@ -242,48 +228,14 @@ export const useThreadsStore = defineStore('threads', () => {
   // Sending: everything sealed, by the most direct road the pillar has
   // ------------------------------------------------------------------------
 
-  /**
-   * Seal `payload` to a contact: to EVERY device of their account (their profile card),
-   * each one by its most direct road — by token if it is online this session (the only
-   * road that can go up to WebRTC), by pubkey if not (the proxy's 24 h offline queue).
-   * It fails only if no device could be reached; the same message twice is dropped by
-   * its id on the other side.
-   * `quiet`: queue it without ringing their phone (presence can wait).
-   */
-  const sendToContact = async (pubkey, payload, { quiet = false } = {}) => {
-    const c = contacts.findByPubkey(pubkey)
-    if (!c) throw Object.assign(new Error('not a contact'), { code: 'not-contact' })
-    const recipients = contacts.recipientsOf(c.publickey)
-    if (!recipients.length) throw Object.assign(new Error('no device of this account is known yet'), { code: 'no-devices' })
-    let sent = 0
-    let last = null
-    for (const r of recipients) {
-      const token = deviceTokens.get(r.pubkey) ||
-        (recipients.length === 1 ? contacts.liveTokenFor(c.publickey) : null)
-      try {
-        if (token) {
-          if (!transportGreeted.has(token)) { connection.wsProxyClient.helloTo(token); transportGreeted.add(token) }
-          await connection.sendSealedTo(token, payload, { peerPubkey: r.pubkey, peerEncPub: r.encPub })
-        }
-        else await connection.sendSealed(r.pubkey, payload, { peerEncPub: r.encPub, quiet })
-        sent++
-      } catch (e) { last = e }
-    }
-    if (!sent) throw last
-  }
+  /** Seal `payload` to a contact, to every device of their account (@dotrino/profile/friends). */
+  const sendToContact = (pubkey, payload, opts) => friends.send(pubkey, payload, opts)
 
+  /** What I send about myself: nickname, version and my profile card (@dotrino/profile/friends). */
   const whoAmI = async () => {
     const id = await getIdentity()
     if (!id) return null
-    // TARJETA DE PERFIL: lo mínimo para que el otro pueda cifrarnos a TODOS nuestros
-    // dispositivos y no solo a este (perfil, versión y llaves de cifrado; sin etiquetas
-    // ni permisos). Ver dotrino-vault/docs/acta-de-perfil.md.
-    const card = await id.profileCard?.().catch(() => null)
-    return {
-      nickname: connection.nickname,
-      v: MY_VERSION,              // qué soy y qué versión corro (§14)
-      ...(card ? { card } : {})
-    }
+    return friends.me()
   }
 
   const sendDM = async (pubkey, text) => {
@@ -359,30 +311,11 @@ export const useThreadsStore = defineStore('threads', () => {
     }
   }
 
-  /**
-   * POR DÓNDE VA un contacto ahora, para enseñarlo con su tope: el mejor camino entre sus
-   * aparatos conectados, u `offline` si no hay ninguno (lo suyo espera en el proxio).
-   */
-  const routeOf = async (pubkey) => {
-    const c = contacts.findByPubkey(pubkey)
-    if (!c || !contacts.isOnline(c.publickey)) return 'offline'
-    const recipients = contacts.recipientsOf(c.publickey)
-    const tokens = new Set()
-    for (const r of recipients) if (deviceTokens.get(r.pubkey)) tokens.add(deviceTokens.get(r.pubkey))
-    const live = contacts.liveTokenFor(c.publickey)
-    if (live) tokens.add(live)
-    let best = 'offline'
-    for (const t of tokens) {
-      const r = await connection.wsProxyClient.routeTo(t)
-      if (ROUTE_ORDER.indexOf(r) < ROUTE_ORDER.indexOf(best)) best = r
-    }
-    return best
-  }
+  /** Por dónde va un contacto ahora: el mejor camino entre sus aparatos conectados. */
+  const routeOf = (pubkey) => friends.routeOf(pubkey)
 
   /** Un token que murió (la otra punta se fue) deja de usarse para escribirle. */
-  const forgetToken = (token) => {
-    for (const [pk, t] of deviceTokens) if (t === token) deviceTokens.delete(pk)
-  }
+  const forgetToken = (token) => friends.forgetDevice(token)
 
   /** Sends one outgoing DM; if it cannot leave now, it stays in the outbox. */
   const deliver = async (item) => {
@@ -433,97 +366,20 @@ export const useThreadsStore = defineStore('threads', () => {
     await sendHelloTo(pubkey)
   }
 
-  // ---- Contact requests ---------------------------------------------------
+  // ---- Contact requests: @dotrino/profile/friends --------------------------------
 
-  /**
-   * Ask someone to be a contact. The other side gets it in its REQUESTS INBOX; nothing
-   * reaches any chat, and nobody is a contact of anybody until they accept.
-   * `token` + `pubkey` come from redeeming their pairing code.
-   */
-  const sendContactRequest = async ({ token, pubkey, alias, card = null }) => {
-    if (!pubkey) throw Object.assign(new Error('the pairing code did not say whose it is'), { code: 'no-peer-identity' })
-    const me = await whoAmI()
-    if (!me) throw Object.assign(new Error('identity vault unreachable'), { code: 'no-identity' })
-    // If they already asked me, this is an acceptance: both sides want it.
-    if (requests.get(pubkey, 'in')) { await acceptRequest(pubkey); return }
-    const payload = { type: 'CONTACT_REQUEST', ...me }
-    // Con su TARJETA (el enlace #to= del correo la trae) se le escribe a todos sus aparatos
-    // con las llaves de cifrado que ella misma lista: no hace falta que las haya publicado
-    // en el proxio. Cuenta solo si el vault la adopta y prueba que esa llave es suya.
-    const account = card ? await adoptCardFor(card, pubkey) : null
-    if (account) {
-      let sent = 0
-      let last = null
-      for (const r of contacts.recipientsOf(account)) {
-        try { await connection.sendSealed(r.pubkey, payload, { peerEncPub: r.encPub }); sent++ } catch (e) { last = e }
-      }
-      if (!sent) throw last || Object.assign(new Error('no device of this account is known'), { code: 'no-devices' })
-      requests.upsert({ pubkey: account, dir: 'out', nickname: (alias || '').trim(), token: null, ts: Date.now() })
-      return
-    }
-    if (token) await connection.sendSealedTo(token, payload, { peerPubkey: pubkey })
-    else await connection.sendSealed(pubkey, payload)
-    requests.upsert({ pubkey, dir: 'out', nickname: (alias || '').trim(), token: token || null, ts: Date.now() })
-  }
+  /** Ask someone to be a contact (their requests inbox; nobody is a contact until they accept). */
+  const sendContactRequest = ({ token, pubkey, alias, card = null }) => friends.request({ token, pubkey, alias, card })
 
   // ------------------------------------------------------------------------
   // Inbound
   // ------------------------------------------------------------------------
 
-  const sameKey = (a, b) => { try { return !!a && !!b && samePubkey(a, b) } catch (_) { return false } }
-
-  /** Every encryption key I know for a contact: the one I saved, plus their profile card. */
-  const knownEncPubs = (c) => {
-    const out = []
-    if (c?.encryptionPubkey) out.push(c.encryptionPubkey)
-    const card = contacts.cardOf(c?.publickey)
-    for (const k of (card?.keys || [])) if (k.encPub) out.push(k.encPub)
-    return out
-  }
-
-  /**
-   * WHO SENT THIS. Their identity comes from the proxy (`fromPubkey`, when routed by key)
-   * or from the transport greeting (by token); it is TRUSTED only if the key that sealed
-   * the envelope belongs to that identity: one I already know for that contact, or the one
-   * that identity announced signed. Returns `{ pubkey, contact }` or null.
-   */
-  const authenticate = async (fromToken, meta) => {
-    // Por token desde un token que nadie saludó (las nativas no saludan antes de mandar), la
-    // llave no viene: se le pregunta al proxio de quién es, como hacen ellas. Antes se tiraba.
-    let claimed = meta.fromPubkey || connection.pubkeyOfToken(fromToken)
-    if (!claimed && fromToken) claimed = await connection.whoIs(fromToken).catch((e) => { console.warn('[messenger] whoIs failed:', e?.code || '', e?.message); return null })
-    const senderEncPub = meta.senderEncPub
-    if (!claimed || !senderEncPub) return null
-    const contact = contacts.findBySender(claimed)
-    if (contact && knownEncPubs(contact).some(k => sameKey(k, senderEncPub))) {
-      return { pubkey: contact.publickey, contact, encPub: senderEncPub, device: claimed }
-    }
-    let announced = null
-    try { announced = await connection.encPubOf(claimed) } catch (e) {
-      console.warn('[messenger] could not verify the sender key:', e?.code || '', e?.message)
-      return null
-    }
-    if (!sameKey(announced, senderEncPub)) {
-      console.warn('[messenger] message sealed with a key that is not the sender\'s — dropped')
-      return null
-    }
-    return { pubkey: contact?.publickey || claimed, contact: contact || null, encPub: senderEncPub, device: claimed }
-  }
-
   const handleIncoming = async (fromToken, payload, meta = {}) => {
-    if (!payload || typeof payload !== 'object' || typeof payload.type !== 'string') return
-    // Lo que no llegó sellado ni se mira (el pilar ya lo descarta con requireSealed).
-    if (!meta.sealed) return
-    const who = await authenticate(fromToken, meta)
-    if (!who) return
-    if (fromToken) deviceTokens.set(who.device, fromToken)
-    // BLOQUEADO (indicador privado de la tarjeta de perfil): no entra nada suyo, ni mensajes
-    // ni solicitudes, y no se le contesta — tampoco el acuse, que le diría que llegó.
-    if (contacts.isBlocked(who.pubkey) || (meta.fromPubkey && contacts.isBlocked(meta.fromPubkey))) return
-    switch (payload.type) {
-      case 'CONTACT_REQUEST': return handleContactRequest(fromToken, who, payload)
-      case 'CONTACT_ACCEPT':  return handleContactAccept(fromToken, who, payload)
-    }
+    // Sellado, autenticado, sin bloqueados, y las solicitudes de amistad: @dotrino/profile/friends.
+    const r = await friends.receive(fromToken, payload, meta)
+    if (!r || r.handled) return
+    const who = r.who
     // From here on, only contacts. A stranger's message goes nowhere — not to a chat,
     // not to the inbox.
     if (!who.contact) return
@@ -536,74 +392,20 @@ export const useThreadsStore = defineStore('threads', () => {
     }
   }
 
-  /** Their version (§14) and their profile card, whatever the message that brings them. */
-  /** @param {string} pubkey @param {any} payload */
-  const noteProfile = async (pubkey, payload) => {
-    // Qué versión corre el otro lado (§14). No bloquea: se anota y la conversación lo
-    // enseña. Sin esto, hablarle a una versión que no entiende se ve como silencio.
+  /** Their version (§14): noted, not blocking — talking to a version that does not understand looks like silence. */
+  friendHooks.onProfile = (pubkey, payload) => {
     const mismatch = checkPeer(payload.v)
     if (mismatch) peerCompat.value = { ...peerCompat.value, [pubkey]: mismatch }
     else if (peerCompat.value[pubkey]) {
       const { [pubkey]: _removed, ...rest } = peerCompat.value
       peerCompat.value = rest
     }
-    // Su tarjeta de perfil: con ella podremos cifrarle a todos sus dispositivos. El vault
-    // la verifica y no acepta retrocesos ni cambios de master en silencio.
-    if (payload.card) {
-      try {
-        const id = await getIdentity()
-        const r = await id?.adoptPeerCard?.(payload.card)
-        if (r && !r.adopted && r.reason === 'master-changed') {
-          console.warn('[messenger] the card of %s is signed by another device: not adopted silently', pubkey.slice(0, 24))
-        }
-      } catch (e) { console.warn('adoptPeerCard:', e?.message || e) }
-      await contacts.refresh()
-    }
   }
+  const noteProfile = (pubkey, payload) => friends.noteProfile(pubkey, payload)
 
-  /** Adopta una tarjeta que llega por enlace; devuelve su cuenta si prueba que `pubkey` es suya. */
-  const adoptCardFor = async (card, pubkey) => {
-    // Copia plana: la que llega de la UI es un Proxy reactivo, y postMessage no lo clona.
-    card = JSON.parse(JSON.stringify(card))
-    try {
-      const id = await getIdentity()
-      await id?.adoptPeerCard?.(card)
-      await contacts.refresh()
-    } catch (e) {
-      console.warn('[messenger] the card in the link could not be adopted:', e?.message || e)
-      return null
-    }
-    const account = contacts.accountFromCard(card, pubkey)
-    if (!account) console.warn('[messenger] the card in the link does not prove that key: sending to the key alone')
-    return account
-  }
-
-  /**
-   * La CUENTA de quien escribe: la de su tarjeta si la firmó su perfil y la trajo el propio
-   * aparato, o la llave del aparato si no hay tarjeta así. Es la llave con la que se guarda.
-   */
-  const accountOf = (who, payload) =>
-    who.contact?.publickey || contacts.accountFromCard(payload.card, who.device) || who.pubkey
-
-  /**
-   * Un contacto de antes, guardado por la llave de un aparato, pasa a su cuenta en cuanto
-   * ese mismo aparato trae la tarjeta que lo prueba. Su hilo se va con él.
-   */
-  const upgradeToAccount = async (who, payload) => {
-    const c = who.contact
-    if (!c || !sameKey(c.publickey, who.device)) return c
-    const account = contacts.accountFromCard(payload.card, who.device)
-    if (!account || sameKey(account, c.publickey)) return c
-    try {
-      await contacts.moveToAccount(c.publickey, account)
-      await moveThread(c.publickey, account)
-      console.log('[messenger] contact moved from a device key to its account')
-    } catch (e) {
-      console.warn('[messenger] could not move the contact to its account:', e?.code || '', e?.message)
-      return c
-    }
-    return contacts.findByPubkey(account) || c
-  }
+  /** A contact kept by a device key moves to its account when that device brings its card; its thread goes with it. */
+  const upgradeToAccount = (who, payload) => friends.upgradeToAccount(who, payload)
+  friendHooks.onMoved = (from, to) => moveThread(from, to)
 
   /** Lleva los mensajes de un hilo a otra clave (el del aparato al de la cuenta). */
   const moveThread = async (from, to) => {
@@ -622,83 +424,18 @@ export const useThreadsStore = defineStore('threads', () => {
     filesLoaded.delete(to)
   }
 
-  const handleContactRequest = async (fromToken, who, payload) => {
-    const nickname = sanitizeNickname(payload.nickname || '')
-    await noteProfile(who.pubkey, payload)
-    const contact = await upgradeToAccount(who, payload)
-    const account = contact?.publickey || accountOf(who, payload)
-    if (contacts.isBlocked(account)) return
-    // Ya es contacto por su cuenta —la de Dotrino lo es siempre, o lo agregaste desde
-    // otro de sus aparatos—: se acepta igual que si fuera el mismo aparato.
-    const known = contact || contacts.findByPubkey(account)
-    // Someone redeemed your code: a code is SINGLE USE, so the one on screen is burnt.
-    // Ask for another one now, or the next friend types a dead one.
-    connection.refreshPairingCode?.().catch?.(() => {})
-    contacts.markOnline(account, fromToken)
-    // Already a contact (they reinstalled, lost us…): accept straight away.
-    // And if I had asked them too, both sides want it.
-    if (known || requests.get(who.device, 'out') || requests.get(account, 'out')) {
-      await becomeContacts(account, { nickname, token: fromToken, encryptionPubkey: who.encPub, device: who.device })
-      await replyAccept(account)
-      return
-    }
-    const vouched = await isVouched(account)
-    requests.upsert({
-      pubkey: account, dir: 'in', nickname, token: fromToken,
-      encryptionPubkey: who.encPub, ts: Date.now(), vouched
-    })
-    notify('hello', {
-      id: 'request-' + account,
-      fromPubkey: account,
-      fromNickname: nickname || account.slice(0, 8),
-      text: '',
-      ts: Date.now(),
-      request: true
-    }, vouched)
-  }
-
-  const handleContactAccept = async (fromToken, who, payload) => {
-    // Only counts if I asked — or if they are already a contact by their account (the
-    // Dotrino one always is). Nobody adds themselves to my contacts.
-    await noteProfile(who.pubkey, payload)
-    const contact = await upgradeToAccount(who, payload)
-    const account = contact?.publickey || accountOf(who, payload)
-    // Lo pedí a ese aparato, o a su cuenta entera (con su tarjeta, desde un enlace).
-    const mine = requests.get(who.device, 'out') || requests.get(account, 'out')
-    if (!mine && !contact && !contacts.findByPubkey(account)) return
-    await becomeContacts(account, {
-      nickname: mine?.nickname || sanitizeNickname(payload.nickname || ''),
-      token: fromToken,
-      encryptionPubkey: who.encPub,
-      device: who.device
-    })
-    contacts.markOnline(account, fromToken)
-  }
-
-  /**
-   * `pubkey` is the key the contact is kept by (their account when their card proves it);
-   * `device` the one that wrote, under which any pending request was filed.
-   */
-  const becomeContacts = async (pubkey, { nickname, token, encryptionPubkey, device = null }) => {
-    const existing = contacts.findByPubkey(pubkey)
-    await contacts.addContact({
-      // La misma llave puede venir escrita de otra forma: se queda en el registro que ya hay.
-      pubkey: existing?.publickey || pubkey,
-      nickname: existing?.nickname || nickname || pubkey.slice(0, 8),
-      token: token || undefined,
-      encryptionPubkey: encryptionPubkey || existing?.encryptionPubkey,
-      notes: undefined
-    })
-    requests.remove(pubkey)
-    if (device && device !== pubkey) requests.remove(device)
-    flushOutbox()
-  }
-
-  const replyAccept = async (pubkey) => {
-    const me = await whoAmI()
-    if (!me) return
-    await sendToContact(pubkey, { type: 'CONTACT_ACCEPT', ...me })
-  }
+  // Lo que el messenger hace cuando @dotrino/profile/friends dice algo: ya sois amigos (sale lo que
+  // esperaba) y llegó una solicitud (aviso en pantalla, según las preferencias).
+  friendHooks.onFriend = () => { flushOutbox() }
+  friendHooks.isVouched = isVouched
+  friendHooks.onRequest = (r) => notify('hello', {
+    id: 'request-' + r.pubkey,
+    fromPubkey: r.pubkey,
+    fromNickname: r.nickname || r.pubkey.slice(0, 8),
+    text: '',
+    ts: Date.now(),
+    request: true
+  }, r.vouched)
 
   const handleHello = async (fromToken, who, payload) => {
     await noteProfile(who.contact.publickey, payload)
@@ -818,22 +555,16 @@ export const useThreadsStore = defineStore('threads', () => {
   // esto, un mensaje mandado desde el móvil no se vería aquí hasta recargar la página.
   onVaultChanged(() => reload())
 
-  // ---- Requests inbox ------------------------------------------------------
+  // ---- Requests inbox: @dotrino/profile/friends -----------------------------------
 
   /** Accept a request: now we are contacts on both sides. No message enters any chat. */
   const acceptRequest = async (pubkey) => {
-    const r = requests.get(pubkey, 'in')
-    if (!r) return
-    await becomeContacts(pubkey, { nickname: r.nickname, token: r.token, encryptionPubkey: r.encryptionPubkey })
-    if (r.token) contacts.markOnline(pubkey, r.token)
-    await replyAccept(pubkey)
+    await friends.accept(pubkey)
     await contacts.refresh()
   }
 
   /** Dismiss an incoming request, or cancel one I sent. The other side is not told. */
-  const dismissRequest = (pubkey, dir = 'in') => {
-    requests.remove(pubkey, dir)
-  }
+  const dismissRequest = (pubkey, dir = 'in') => friends.dismiss(pubkey, dir)
 
   return {
     threads, activePubkey, activeThread, activeContact, outbox, lastIncomingDM, peerCompat,

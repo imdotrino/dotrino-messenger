@@ -4,6 +4,7 @@ import { getWebSocketProxyClient, identitySealing } from '@dotrino/proxy-client'
 import { getIdentity } from '../services/identity'
 import { key as accountKey } from '../services/account'
 import { sanitizeNickname } from '../utils/sanitize'
+import { getFriends, nickname as friendsNickname } from '../services/friends'
 
 export const useConnectionStore = defineStore('connection', () => {
   // Esta app es `messenger`: en el teléfono la llave es de todas las apps de Dotrino, y el
@@ -46,6 +47,8 @@ export const useConnectionStore = defineStore('connection', () => {
   // cuenta, la app siguiera enseñando el nombre de la anterior.
   const NICK_KEY = accountKey('messenger_nickname')
   const nickname = ref(sanitizeNickname(localStorage.getItem(NICK_KEY) || ''))
+  // El apodo que @dotrino/profile/friends manda en las solicitudes es este mismo.
+  friendsNickname.value = nickname.value
   const nicknameSet = computed(() => nickname.value.trim().length > 0)
 
   // Self-presence channel name is derived from my own pubkey, so contacts can
@@ -56,6 +59,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const setNickname = (name, opts = {}) => {
     nickname.value = sanitizeNickname((name || '').trim())
+    friendsNickname.value = nickname.value
     localStorage.setItem(NICK_KEY, nickname.value)
     // También guardarlo en la vault, así viaja con `id.exportIdentity()`. Si el
     // caller pasa `{ writeToVault: false }` saltamos esto para no contaminarla.
@@ -242,80 +246,22 @@ export const useConnectionStore = defineStore('connection', () => {
 
   // ── El código corto que se comparte ("pásame tu pin") ──────────────────
   //
-  // El identificador de la conexión dejó de ser un código de 4 caracteres: hoy
-  // es una INSTANCIA larga (id de proxio + 22 al azar) que no se puede dictar ni
-  // teclear. Lo que se comparte es una CITA: 6 caracteres que caducan en minutos
-  // y resuelven a la conexión de su dueño, en el proxio que sea.
-  const pairingCode = ref(null)
-  let pairingTimer = null
-
-  const refreshPairingCode = async () => {
-    if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = null }
-    try {
-      const res = await wsProxyClient.requestPairingCode()
-      pairingCode.value = res?.code || null
-      const left = (res?.expiresAt || 0) - Date.now()
-      if (left > 10000) pairingTimer = setTimeout(refreshPairingCode, left - 5000)
-    } catch (_) { pairingCode.value = null }
-  }
-
-  /**
-   * Espera a que el socket esté vivo. La gente abre la app y teclea el código al
-   * instante —o llega con un QR ya escaneado— y el socket tarda un segundo largo
-   * en levantarse: sin esta espera el primer intento se perdía y la culpa se la
-   * llevaba el código, que estaba perfecto.
-   */
-  const waitConnected = async (ms = 8000) => {
-    const t0 = Date.now()
-    while (!isConnected.value && Date.now() - t0 < ms) {
-      await new Promise((r) => setTimeout(r, 150))
-    }
-    return isConnected.value
-  }
+  // El identificador de la conexión es una INSTANCIA larga que no se puede dictar ni teclear.
+  // Lo que se comparte es una CITA de 6 caracteres que caduca en minutos: la pide, la renueva y
+  // la canjea @dotrino/profile/friends. Aquí queda su espejo reactivo para la barra.
+  const friends = getFriends()
+  const pairingCode = ref(friends.code)
+  friends.onChange(() => { pairingCode.value = friends.code })
+  const refreshPairingCode = () => friends.refreshCode()
 
   /**
    * Canjea la cita de otra persona.
-   * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'}>}
-   *
-   * El `reason` importa: «no hay red» y «ese código no vale» se arreglan de forma
-   * distinta —una esperando, la otra pidiendo otro código— y decir la segunda
-   * cuando pasa la primera manda a la gente a buscar un problema que no existe.
-   * Se distingue por `e.code`, nunca por el texto del error (que se traduce).
+   * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'|'own'}>}
    */
-  const redeemPairingCode = async (code) => {
-    if (!(await waitConnected())) return { ok: false, reason: 'offline' }
-    try {
-      const res = await wsProxyClient.redeemPairingCode(code)
-      if (res?.ok && res.instance) return res
-      return { ok: false, reason: 'invalid', error: res?.error }
-    } catch (e) {
-      const offline = e?.code === 'NOT_CONNECTED' || e?.code === 'REQUEST_TIMEOUT'
-      return { ok: false, reason: offline ? 'offline' : 'invalid', error: e?.message }
-    }
-  }
+  const redeemPairingCode = (code) => friends.redeemCode(code)
 
-  /**
-   * DE QUIÉN ES ESTE TOKEN. Canjear un código da la dirección (la instancia) pero no dice de
-   * quién es, y sin eso no hay a quién sellarle. Se pregunta con el saludo del transporte:
-   * la otra punta contesta con su pubkey. No autentica, y no hace falta — lo que se le
-   * mande va sellado a la llave que ESA identidad anunció firmada, así que quien mintiera
-   * en el saludo no podría abrirlo.
-   * @returns {Promise<string|null>} la pubkey, o null si no contestó a tiempo
-   */
-  const whoIs = async (token, ms = 10000) => {
-    const known = wsProxyClient.pubkeyOfToken(token)
-    if (known) return known
-    const t0 = Date.now()
-    // `helloTo` exige estar identificado: el saludo sin identidad no dice nada.
-    while (!wsProxyClient.myPublickey && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 150))
-    if (!wsProxyClient.myPublickey) return null
-    return new Promise((resolve) => {
-      const done = (pk) => { off(); clearTimeout(timer); resolve(pk) }
-      const off = wsProxyClient.on('peer_identity', (t, pk) => { if (t === token) done(pk) })
-      const timer = setTimeout(() => done(null), Math.max(1000, ms - (Date.now() - t0)))
-      wsProxyClient.helloTo(token)
-    })
-  }
+  /** De quién es este token (lo pregunta el pilar con el saludo del transporte). */
+  const whoIs = (token, ms = 10000) => wsProxyClient.whoIs(token, ms)
 
   const setPresenceChannel = (name) => { presenceChannel.value = name }
 
@@ -366,7 +312,7 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   return {
-    token, pairingCode, refreshPairingCode, redeemPairingCode, waitConnected,
+    token, pairingCode, refreshPairingCode, redeemPairingCode,
     isConnected, connectionError, wsUrl, nickname, nicknameSet, presenceChannel,
     myPublickey, queuedDelivered, routeTick,
     connect, disconnect, sendSealedTo, sendSealed, encPubOf, pubkeyOfToken, whoIs, setNickname, setPresenceChannel, wsProxyClient,
