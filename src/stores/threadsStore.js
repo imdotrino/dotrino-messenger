@@ -181,7 +181,7 @@ export const useThreadsStore = defineStore('threads', () => {
   }
 
   // Actualiza un campo de una entry existente y la persiste de nuevo. Útil
-  // para marcar `pending: false` tras DM_ACK o tras envío exitoso.
+  // para marcar `pending: false` tras DM_ACK.
   const updateEntry = async (pubkey, entryId, patch) => {
     const arr = threads.value[pubkey]
     if (!arr) return
@@ -317,13 +317,39 @@ export const useThreadsStore = defineStore('threads', () => {
   /** Un token que murió (la otra punta se fue) deja de usarse para escribirle. */
   const forgetToken = (token) => friends.forgetDevice(token)
 
+  /**
+   * EL ✓ LO PONE EL ACUSE DEL OTRO LADO, NO QUE AQUÍ SALIERA. Hasta 0.8.x un mensaje se daba
+   * por entregado en cuanto salía de este aparato: si se perdía por el camino (un canal
+   * directo medio caído, la otra punta con una versión vieja), aquí se veía ✓ y nadie lo
+   * volvía a mandar. Ahora, lo que sale en vivo y no se confirma en ACK_WAIT_MS se manda otra
+   * vez por la cola del proxio (por pubkey), que se lo entrega al reconectar; el otro lado
+   * descarta el repetido por su id.
+   */
+  const ACK_WAIT_MS = 10000
+  const awaitAck = (item) => {
+    setTimeout(async () => {
+      const e = (threads.value[item.pubkey] || []).find(x => x.id === item.entryId)
+      if (!e || !e.pending) return
+      try {
+        await sendToContact(item.pubkey, { type: 'DM', text: item.text, ts: item.ts, mid: item.entryId }, { queue: true })
+      } catch (err) {
+        console.warn('[messenger] unacknowledged DM could not be queued, will retry:', err?.code || '', err?.message)
+        if (!outbox.value.some(x => x.entryId === item.entryId)) outbox.value.push(item)
+      }
+    }, ACK_WAIT_MS)
+  }
+
   /** Sends one outgoing DM; if it cannot leave now, it stays in the outbox. */
   const deliver = async (item) => {
     try {
+      // Si va en vivo (el contacto está conectado) hay que vigilar el acuse; si no, ya va a la
+      // cola. Si no se sabe por dónde va, se vigila: reencolar de más lo descarta el otro lado.
+      const live = !item.file && (await routeOf(item.pubkey).catch(() => 'unknown')) !== 'offline'
       await sendToContact(item.pubkey, { type: 'DM', text: item.text, ts: item.ts, mid: item.entryId, ...(item.file ? { file: item.file } : {}) })
-      // Un archivo se da por entregado con el acuse del otro lado: va en partes, y si la otra
-      // punta se va a mitad, no llega entero aunque aquí todo saliera.
-      await updateEntry(item.pubkey, item.entryId, item.file ? { waits: null } : { pending: false })
+      // Un archivo también se da por entregado con el acuse: va en partes, y si la otra punta
+      // se va a mitad, no llega entero aunque aquí todo saliera.
+      if (item.file) await updateEntry(item.pubkey, item.entryId, { waits: null })
+      if (live) awaitAck(item)
       return true
     } catch (e) {
       console.warn('[messenger] DM could not be sent, will retry:', e?.code || '', e?.message)

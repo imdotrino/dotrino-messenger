@@ -49,7 +49,18 @@ resolveAccount()
     app.mount('#app')
   })
 
-registerSW({ immediate: true })
+// Una pestaña que se queda abierta días (la tablet) no vuelve a cargar la página: sin mirar
+// cada rato si hay versión nueva, se queda con la vieja para siempre, y una versión vieja
+// puede no entender lo que le mandan. Se mira cada 30 min y al volver a la pestaña.
+registerSW({
+  immediate: true,
+  onRegisteredSW (_url, reg) {
+    if (!reg) return
+    const check = () => { reg.update().catch((e) => console.error('[cc-messenger] sw update:', e)) }
+    setInterval(check, 30 * 60_000)
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check() })
+  },
+})
 
 // Web Push: el SW (dotrino-push-sw.js, inyectado en el SW de Workbox vía
 // workbox.importScripts) hace postMessage('cc-push-ring') al recibir el timbre.
