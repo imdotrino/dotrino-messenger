@@ -45,6 +45,9 @@ test('Dotrino fijo, enlace #to= y contacto por cuenta', async () => {
 
   // Dotrino está sin agregarlo, y sin aparatos conocidos no se le puede escribir todavía.
   await ana.page.getByTestId('contact-dotrino').click({ timeout: WAIT })
+  // Y lleva el logo de Dotrino, no el identicon de su llave: en la lista y en la conversación.
+  await expect(ana.page.getByTestId('contact-dotrino').locator('img.avatar')).toHaveAttribute('src', /dotrino-[^/]+\.png$/)
+  await expect(ana.page.locator('.conv .head img.avatar')).toHaveAttribute('src', /dotrino-[^/]+\.png$/)
   await expect(ana.page.getByTestId('no-devices')).toBeVisible()
   await expect(ana.page.getByTestId('composer-input')).toBeDisabled()
 

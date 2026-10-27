@@ -3,6 +3,8 @@ import { ref, computed } from 'vue'
 import { getIdentity } from '../services/identity'
 import { computeDerivedRating, buildTrustMap } from '../utils/rating'
 import { getReputation } from '../services/reputation'
+import { avatarDataUri } from '@dotrino/identity/avatar'
+import dotrinoLogo from '../assets/dotrino.png'
 
 import { getFriends, DOTRINO_ACCOUNT } from '../services/friends'
 
@@ -46,6 +48,10 @@ export const useContactsStore = defineStore('contacts', () => {
   // vuelva a pintar cuando cambie.
   const findByPubkey = (pubkey) => (peers.value, book.find(pubkey))
   const isPinned = (pubkey) => book.isPinned(pubkey)
+  // El AVATAR es el del ecosistema: el identicon DETERMINISTA del pubkey, el mismo que pintan
+  // <dotrino-topbar> y <dotrino-profile>; no cambia con el apodo porque la llave no cambia.
+  // La excepción es Dotrino, el contacto fijo: lleva su logo, para que se reconozca de un vistazo.
+  const avatarFor = (pubkey, opts) => (isPinned(pubkey) ? dotrinoLogo : avatarDataUri(pubkey, opts))
   const cardOf = (pubkey) => (peers.value, book.cardOf(pubkey))
   const findBySender = (pubkey) => (peers.value, book.findBySender(pubkey))
   const moveToAccount = (from, account) => book.moveToAccount(from, account)
@@ -119,7 +125,7 @@ export const useContactsStore = defineStore('contacts', () => {
     refresh, refreshPeers,
     addContact, updateContact, removeContact,
     findByPubkey, findByToken, findBySender, cardOf, peerFor,
-    isPinned, accountFromCard, recipientsOf, moveToAccount,
+    isPinned, avatarFor, accountFromCard, recipientsOf, moveToAccount,
     markOnline, markOffline, isOnline, tokenFor, liveTokenFor,
     ratePeer, ratingFor, myRatingFor, isBlocked, cloudReputationFor, myIndicatorsFor
   }

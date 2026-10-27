@@ -3,15 +3,6 @@ import { ref, nextTick, watch, computed, onUnmounted } from 'vue'
 import { useThreadsStore } from '../stores/threadsStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { t, locale } from '../i18n'
-// El AVATAR es el del ecosistema, no uno de la app. Se importa del pilar por su
-// subpath barato (`@dotrino/identity/avatar`, sin arrastrar el vault): es un identicon
-// DETERMINISTA del pubkey, el mismo que pintan <dotrino-topbar> y <dotrino-profile>.
-//
-// Antes cada vista dibujaba las iniciales del apodo sobre un disco de color de una
-// paleta propia. Dos consecuencias, las dos vistas: el mismo contacto se veía distinto
-// en la lista que en su ficha, y el avatar CAMBIABA al cambiar el apodo (que cambia
-// solo, en el saludo). El identicon no se mueve: la llave no cambia.
-import { avatarDataUri } from '@dotrino/identity/avatar'
 import { useConnectionStore } from '../stores/connectionStore'
 import { INLINE_IMAGE, LIMITS, fitsRoute, humanSize, downloadFile } from '../utils/file'
 
@@ -146,7 +137,7 @@ const grouped = computed(() => {
     <header class="head">
       <button class="back" @click="emit('back')" :title="t.conv.back">←</button>
       <div class="avatar-wrap" @click="emit('rate', c.publickey)" :title="t.conv.rate">
-        <img class="avatar" :src="avatarDataUri(c.publickey, { size: 76 })" alt="" />
+        <img class="avatar" :src="contacts.avatarFor(c.publickey, { size: 76 })" alt="" />
         <span v-if="online" class="online-dot"></span>
       </div>
       <div class="who">

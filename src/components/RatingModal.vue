@@ -28,6 +28,8 @@ const peer = computed(() => contacts.peerFor(props.pubkey))
 const name = computed(() => contact.value?.nickname || '')
 const since = computed(() => peer.value?.firstSeen || null)
 const online = computed(() => contacts.isOnline(props.pubkey))
+// Solo Dotrino lleva foto (su logo); los demás, sin atributo, salen con su identicon.
+const avatar = computed(() => (contacts.isPinned(props.pubkey) ? contacts.avatarFor(props.pubkey) : undefined))
 
 const onClose = () => emit('close')
 const onRate = () => { contacts.refresh(); contacts.refreshPeers() }
@@ -74,5 +76,6 @@ onBeforeUnmount(() => {
     :name="name"
     :since="since || undefined"
     :online="online || undefined"
+    :avatar="avatar"
   />
 </template>

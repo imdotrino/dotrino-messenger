@@ -3,15 +3,6 @@ import { computed } from 'vue'
 import { useContactsStore } from '../stores/contactsStore'
 import { useThreadsStore } from '../stores/threadsStore'
 import { t, locale } from '../i18n'
-// El AVATAR es el del ecosistema, no uno de la app. Se importa del pilar por su
-// subpath barato (`@dotrino/identity/avatar`, sin arrastrar el vault): es un identicon
-// DETERMINISTA del pubkey, el mismo que pintan <dotrino-topbar> y <dotrino-profile>.
-//
-// Antes cada vista dibujaba las iniciales del apodo sobre un disco de color de una
-// paleta propia. Dos consecuencias, las dos vistas: el mismo contacto se veía distinto
-// en la lista que en su ficha, y el avatar CAMBIABA al cambiar el apodo (que cambia
-// solo, en el saludo). El identicon no se mueve: la llave no cambia.
-import { avatarDataUri } from '@dotrino/identity/avatar'
 
 
 const contacts = useContactsStore()
@@ -75,7 +66,7 @@ const fmtTime = (ts) => {
       @click="emit('select', c.publickey)"
     >
       <div class="avatar-wrap" @click.stop="emit('rate', c.publickey)" :title="t.list.rate">
-        <img class="avatar" :src="avatarDataUri(c.publickey, { size: 84 })" alt="" />
+        <img class="avatar" :src="contacts.avatarFor(c.publickey, { size: 84 })" alt="" />
         <span v-if="c.online" class="online-dot"></span>
       </div>
       <div class="body">
