@@ -92,8 +92,8 @@ test('dos amigos se emparejan con el código y se escriben', async () => {
     //    ningún chat de Ana aparece nada, y nadie es contacto de nadie todavía.
     await ana.page.getByTestId('accept-request').first().waitFor({ timeout: WAIT })
     await expect(ana.page.getByTestId('msg-in')).toHaveCount(0)
-    // Nadie es contacto de nadie… salvo Dotrino, que está siempre y no se puede quitar.
-    await expect(ana.page.getByTestId('contact-dotrino')).toHaveCount(1, { timeout: WAIT })
+    // Nadie es contacto de nadie. Dotrino tampoco sale: sin aparatos suyos no se le puede escribir.
+    await expect(ana.page.getByTestId('contact-dotrino')).toHaveCount(0)
     await expect(ana.page.getByTestId('contact-item')).toHaveCount(0)
     await expect(beto.page.getByTestId('contact-item')).toHaveCount(0)
     await acceptRequest(ana)

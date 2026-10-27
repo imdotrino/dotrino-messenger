@@ -28,7 +28,9 @@ export const useContactsStore = defineStore('contacts', () => {
 
   const contacts = computed(() => {
     ratingTick.value
-    return peers.value.filter(p => p.isContact)
+    // Dotrino, el contacto fijo, no sale hasta que se le pueda escribir: sus aparatos llegan con
+    // su tarjeta, cuando contesta lo que se pidió por correo. Antes era un chat sin salida.
+    return peers.value.filter(p => p.isContact && (!book.isPinned(p.publickey) || book.recipientsOf(p.publickey).length > 0))
       .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
   })
 

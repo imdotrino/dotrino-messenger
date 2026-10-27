@@ -43,13 +43,13 @@ test('Dotrino fijo, enlace #to= y contacto por cuenta', async () => {
   const ana = await enter(browser, 'Ana')
   const beto = await enter(browser, 'Beto')
 
-  // Dotrino está sin agregarlo, y sin aparatos conocidos no se le puede escribir todavía.
-  await ana.page.getByTestId('contact-dotrino').click({ timeout: WAIT })
-  // Y lleva el logo de Dotrino, no el identicon de su llave: en la lista y en la conversación.
-  await expect(ana.page.getByTestId('contact-dotrino').locator('img.avatar')).toHaveAttribute('src', /dotrino-[^/]+\.png$/)
-  await expect(ana.page.locator('.conv .head img.avatar')).toHaveAttribute('src', /dotrino-[^/]+\.png$/)
-  await expect(ana.page.getByTestId('no-devices')).toBeVisible()
-  await expect(ana.page.getByTestId('composer-input')).toBeDisabled()
+  // Dotrino es fijo, pero sin aparatos conocidos no se le puede escribir: no sale en la lista.
+  await ana.page.getByTestId('contact-dotrino').waitFor({ state: 'detached', timeout: WAIT })
+  await expect.poll(() => store(ana.page, 'contacts', (s) => s.peers.some((p) => p.isContact && s.isPinned(p.publickey))), { timeout: WAIT }).toBe(true)
+  await expect(ana.page.getByTestId('contact-dotrino')).toHaveCount(0)
+  // Cuando salga, con el logo de Dotrino y no con el identicon de su llave.
+  const logo = await store(ana.page, 'contacts', (s) => s.avatarFor(s.peers.find((p) => p.isContact && s.isPinned(p.publickey)).publickey))
+  expect(logo).toMatch(/dotrino-[^/]+\.png$/)
 
   // El enlace del correo: la llave de Beto en base64url, en el #fragment.
   await expect.poll(() => store(beto.page, 'connection', (s) => s.myPublickey), { timeout: WAIT }).toBeTruthy()
