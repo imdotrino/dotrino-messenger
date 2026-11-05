@@ -1,5 +1,6 @@
 import DotrinoNative
 import DotrinoNativeUI
+import DotrinoNativeBluetooth
 import DotrinoNativeWebRTC
 import CoreBluetooth
 import Foundation

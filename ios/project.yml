@@ -34,6 +34,10 @@ targets:
         product: DotrinoNativeUI
       - package: DotrinoNative
         product: DotrinoNativeWebRTC
+      # El Bluetooth (añadir a quien está cerca, hablar directo al lado): producto aparte desde
+      # dotrino-native 0.49.0. Sin él no compila AppModel.swift; con él hace falta el motivo de abajo.
+      - package: DotrinoNative
+        product: DotrinoNativeBluetooth
     info:
       path: Messenger/Info.plist
       properties:
