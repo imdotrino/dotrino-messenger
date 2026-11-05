@@ -11,11 +11,21 @@ export const useRequestsStore = defineStore('requests', () => {
 
   const incoming = computed(() => requests.value.filter(r => (r.dir || 'in') === 'in'))
 
+  /** @typedef {import('@dotrino/profile/friends').FriendRequest} FriendRequest */
   return {
     requests,
     incoming,
+    /** @param {Partial<FriendRequest> & { pubkey: string }} entry */
     upsert: (entry) => inbox.upsert(entry),
+    /**
+     * @param {string} pubkey
+     * @param {'in'|'out'} [dir]
+     */
     remove: (pubkey, dir) => inbox.remove(pubkey, dir),
+    /**
+     * @param {string} pubkey
+     * @param {'in'|'out'} [dir]
+     */
     get: (pubkey, dir = 'in') => inbox.get(pubkey, dir),
     prune: () => inbox.prune(),
   }

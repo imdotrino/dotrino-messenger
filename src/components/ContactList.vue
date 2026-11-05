@@ -31,6 +31,7 @@ const items = computed(() => {
     .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0))
 })
 
+/** @param {number|null} val */
 const stars = (val) => {
   if (val == null) return ''
   const full = Math.round(val)
@@ -39,6 +40,7 @@ const stars = (val) => {
 
 // El día ("lun"/"Mon") y el mes ("ene"/"Jan") son texto VISIBLE: van en el idioma
 // de la app, no en el del navegador (antes `[]` = locale del navegador).
+/** @param {number|null|undefined} ts */
 const fmtTime = (ts) => {
   if (!ts) return ''
   const d = new Date(ts)
@@ -46,7 +48,7 @@ const fmtTime = (ts) => {
   if (d.toDateString() === now.toDateString()) {
     return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   }
-  const diffDays = Math.floor((now - d) / 86400000)
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000)
   if (diffDays < 7) return d.toLocaleDateString(locale.value, { weekday: 'short' })
   return d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short' })
 }

@@ -15,7 +15,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "playwright test",
-    "type-check": "tsc --noEmit"
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@dotrino/compat": "0.4.0",
@@ -40,6 +40,7 @@
     "@vitejs/plugin-vue": "^6.0.2",
     "typescript": "5.9.3",
     "vite": "^7.3.1",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vue-tsc": "3.3.13"
   }
 }

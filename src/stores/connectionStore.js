@@ -11,8 +11,10 @@ export const useConnectionStore = defineStore('connection', () => {
   // proxio necesita saber a cuál despertar y a cuál darle su cola (websocket-proxy ≥ 1.4.0).
   const wsProxyClient = getWebSocketProxyClient({ app: 'messenger' })
 
+  /** @type {import('vue').Ref<string|null>} */
   const token = ref(null)
   const isConnected = ref(false)
+  /** @type {import('vue').Ref<string|null>} */
   const connectionError = ref(null)
   // Proxios conocidos del ecosistema (federados entre sí). El usuario elige su
   // "home"; la federación entrega los mensajes aunque el contacto esté en otro.
@@ -35,7 +37,7 @@ export const useConnectionStore = defineStore('connection', () => {
       const r = await fetch(DIRECTORY_URL, { cache: 'no-cache', signal: ctrl.signal }).finally(() => clearTimeout(t))
       if (!r.ok) return
       const dir = await r.json()
-      const urls = (dir.proxies || []).map(p => p && p.url).filter(u => typeof u === 'string' && /^wss?:\/\//.test(u))
+      const urls = /** @type {unknown[]} */ (dir.proxies || []).map(p => p && /** @type {{ url?: unknown }} */ (p).url).filter(/** @returns {u is string} */ (u) => typeof u === 'string' && /^wss?:\/\//.test(u))
       if (!urls.length) return
       const merged = Array.from(new Set([...urls, ...DEFAULT_PROXIES]))
       KNOWN_PROXIES.value = merged
@@ -53,10 +55,15 @@ export const useConnectionStore = defineStore('connection', () => {
 
   // Self-presence channel name is derived from my own pubkey, so contacts can
   // resolve {pubkey -> token} by listing the channel `presence_<pubkey-hash>`.
+  /** @type {import('vue').Ref<string|null>} */
   const presenceChannel = ref(null)
 
   let handlersSetup = false
 
+  /**
+   * @param {string} name
+   * @param {{ writeToVault?: boolean }} [opts] `writeToVault: false` no lo guarda en la bóveda
+   */
   const setNickname = (name, opts = {}) => {
     nickname.value = sanitizeNickname((name || '').trim())
     friendsNickname.value = nickname.value
@@ -68,6 +75,7 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
+  /** @type {import('vue').Ref<string|null>} */
   const myPublickey = ref(null)
   // Sube cada vez que el camino hacia alguien puede haber cambiado (canal directo abierto o
   // cerrado, un aparato que se fue). La conversación lo mira para volver a preguntar.
@@ -103,7 +111,7 @@ export const useConnectionStore = defineStore('connection', () => {
       // Identificarse con la pubkey del vault para activar la cola offline.
       identifyWithVault().catch(e => console.warn('identify failed:', e))
     } catch (e) {
-      connectionError.value = e.message
+      connectionError.value = e instanceof Error ? e.message : String(e)
       isConnected.value = false
       console.error('Connection error:', e)
     }
@@ -150,6 +158,10 @@ export const useConnectionStore = defineStore('connection', () => {
   // Cambiar de proxio (home): reconecta y re-identifica. Como los proxios están
   // federados, seguís alcanzando a contactos en otros nodos. `persist`: guardar
   // como tu home (selección manual) o solo temporal (failover automático).
+  /**
+   * @param {string} url
+   * @param {{ persist?: boolean }} [opts]
+   */
   const setProxyUrl = async (url, { persist = true } = {}) => {
     const u = (url || '').trim()
     if (!/^wss?:\/\//.test(u) || u === wsUrl.value) return
@@ -160,6 +172,10 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   // Health-check de un proxio (HTTP /health del mismo host).
+  /**
+   * @param {string} wssUrl
+   * @returns {Promise<boolean>}
+   */
   const healthCheck = async (wssUrl) => {
     try {
       const httpUrl = wssUrl.replace(/^ws/, 'http').replace(/\/+$/, '') + '/health'
@@ -177,10 +193,17 @@ export const useConnectionStore = defineStore('connection', () => {
   // el registro de reputación, ponderadas por web-of-trust.)
   const NODE_STATS_KEY = 'messenger_node_stats'
   const FAIL_WINDOW_MS = 30 * 60 * 1000
+  /** @type {Record<string, { failCount?: number, lastFailTs?: number, latencyMs?: number }>} */
   let nodeStats = (() => { try { return JSON.parse(localStorage.getItem(NODE_STATS_KEY) || '{}') } catch { return {} } })()
   const saveStats = () => { try { localStorage.setItem(NODE_STATS_KEY, JSON.stringify(nodeStats)) } catch (_) {} }
+  /** @param {string} url */
   const recordFail = (url) => { const s = nodeStats[url] || {}; s.failCount = (s.failCount || 0) + 1; s.lastFailTs = Date.now(); nodeStats[url] = s; saveStats() }
+  /** @param {string} url */
   const recordOk = (url) => { const s = nodeStats[url]; if (s && s.failCount) { s.failCount = 0; delete s.lastFailTs; saveStats() } }
+  /**
+   * @param {string} url
+   * @returns {number} ms-equivalente
+   */
   const penalty = (url) => {
     const s = nodeStats[url]
     if (!s || !s.lastFailTs) return 0
@@ -191,6 +214,10 @@ export const useConnectionStore = defineStore('connection', () => {
 
   // Pinguea una lista y devuelve los SANOS ordenados por score (latencia +
   // penalización por fallo reciente). Registra la latencia medida.
+  /**
+   * @param {string[]} urls
+   * @returns {Promise<string[]>}
+   */
   const rankHealthy = async (urls) => {
     const res = await Promise.all(urls.map(async (url) => {
       const start = (performance?.now?.() ?? Date.now())
@@ -235,13 +262,28 @@ export const useConnectionStore = defineStore('connection', () => {
   // Lo único que sale de aquí va SELLADO. Por token (lo único que sube a WebRTC) o por
   // pubkey (cola offline de 24 h). La llave del otro la averigua y verifica el pilar si
   // no se la damos.
+  /**
+   * @param {string} token
+   * @param {unknown} payload
+   * @param {Parameters<typeof wsProxyClient.sendSealedTo>[2]} [opts]
+   */
   const sendSealedTo = (token, payload, opts = {}) => wsProxyClient.sendSealedTo(token, payload, opts)
-  /** @param {string} pubkey @param {any} payload @param {{ peerEncPub?: string, quiet?: boolean }} [opts] */
+  /**
+   * @param {string} pubkey
+   * @param {unknown} payload
+   * @param {{ peerEncPub?: string, quiet?: boolean }} [opts]
+   */
   const sendSealed = (pubkey, payload, { peerEncPub, quiet } = {}) =>
     wsProxyClient.sendSealed([pubkey], payload, { app: 'messenger', ...(peerEncPub ? { peerEncPub } : {}), ...(quiet ? { quiet: true } : {}) })
-  /** La llave de cifrado de una identidad, VERIFICADA contra su firma. Lanza con `code`. */
+  /**
+   * La llave de cifrado de una identidad, VERIFICADA contra su firma. Lanza con `code`.
+   * @param {string} pubkey
+   */
   const encPubOf = (pubkey) => wsProxyClient.encPubOf(pubkey)
-  /** De quién es este token, según su saludo del transporte (no autentica). */
+  /**
+   * De quién es este token, según su saludo del transporte (no autentica).
+   * @param {string} token
+   */
   const pubkeyOfToken = (token) => wsProxyClient.pubkeyOfToken(token)
 
   // ── El código corto que se comparte ("pásame tu pin") ──────────────────
@@ -258,11 +300,17 @@ export const useConnectionStore = defineStore('connection', () => {
    * Canjea la cita de otra persona.
    * @returns {Promise<{ok:boolean, instance?:string, publickey?:string, reason?:'offline'|'invalid'|'own'}>}
    */
+  /** @param {string} code */
   const redeemPairingCode = (code) => friends.redeemCode(code)
 
-  /** De quién es este token (lo pregunta el pilar con el saludo del transporte). */
+  /**
+   * De quién es este token (lo pregunta el pilar con el saludo del transporte).
+   * @param {string} token
+   * @param {number} [ms]
+   */
   const whoIs = (token, ms = 10000) => wsProxyClient.whoIs(token, ms)
 
+  /** @param {string|null} name */
   const setPresenceChannel = (name) => { presenceChannel.value = name }
 
   const setupHandlers = () => {
@@ -302,6 +350,7 @@ export const useConnectionStore = defineStore('connection', () => {
     wsProxyClient.on('webrtc_close', () => { routeTick.value++ })
     // El pilar mandó a un token que ya no existe (la otra punta reinició la app) y lo reenvió
     // por su pubkey: ese token se olvida, o los siguientes mensajes volverían a ir ahí.
+    // @ts-expect-error @dotrino/proxy-client 0.45.1 emite 'token_gone' (src/client.js) pero su ProxyEvent no lo declara.
     wsProxyClient.on('token_gone', (peerToken) => {
       import('./contactsStore.js').then(m => m.useContactsStore().markOffline(peerToken)).catch(() => {})
       import('./threadsStore.js').then(m => m.useThreadsStore().forgetToken(peerToken)).catch(() => {})

@@ -28,7 +28,9 @@ function migrateLegacy () {
   } catch (_) {}
 }
 
+/** @type {import('@dotrino/notifications').NotificationsController|null} */
 let _ctrl = null
+/** @returns {import('@dotrino/notifications').NotificationsController} */
 export function getNotifications () {
   if (_ctrl) return _ctrl
   migrateLegacy()
@@ -47,6 +49,11 @@ export function getNotifications () {
 
 // Mapea el evento entrante del messenger (kind + vouched) a las categorías.
 // kind: 'message' | 'request' | 'hello'.
+/**
+ * @param {'message'|'request'|'hello'} kind
+ * @param {boolean} [vouched] alguien de tu red de confianza lo avala
+ * @returns {boolean}
+ */
 export function shouldNotifyKind (kind, vouched = false) {
   const c = getNotifications()
   if (kind === 'message') return c.shouldNotify('contactMessages')
@@ -55,9 +62,11 @@ export function shouldNotifyKind (kind, vouched = false) {
   return true
 }
 
+/** @returns {boolean} */
 export function notifSoundEnabled () { return getNotifications().soundEnabled }
 
 // Re-registra la push subscription tras identify (endpoints rotan). Silencioso.
+/** @returns {Promise<void>} */
 export function ensurePushSubscribed () {
   const p = getNotifications().push
   return p ? p.ensureSubscribed() : Promise.resolve()

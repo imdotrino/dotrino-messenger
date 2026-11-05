@@ -6,10 +6,23 @@
 // requieren contactos/conversación se gatean con skipIf y aparecen cuando existen.
 import { createTutorial } from '@dotrino/tutorial'
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** @type {import('@dotrino/tutorial').DotrinoTutorial|null} */
 let instance = null
 
+/**
+ * Arranca el tutorial (una vez por sesión de la página).
+ * @param {{
+ *   lang: () => 'es'|'en',
+ *   setSidebarMobile: (open: boolean) => void,
+ *   openAdd: (open: boolean) => void,
+ *   openConvo: () => void,
+ *   hasContact: () => boolean,
+ * }} ctx lo que el tutorial necesita mover de la app
+ * @returns {import('@dotrino/tutorial').DotrinoTutorial}
+ */
 export function startAppTutorial (ctx) {
   if (instance) return instance
 

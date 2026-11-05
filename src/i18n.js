@@ -10,6 +10,7 @@ import { ref, computed } from 'vue'
 
 export const LANG_KEY = 'dotrino.lang'
 
+/** @returns {'es'|'en'} */
 export function detectLang () {
   try {
     const saved = localStorage.getItem(LANG_KEY)
@@ -23,7 +24,10 @@ export function detectLang () {
 
 export const lang = ref(detectLang())
 
-/** Lo llama App.vue al recibir 'dotrino-lang' del topbar. */
+/**
+ * Lo llama App.vue al recibir 'dotrino-lang' del topbar.
+ * @param {unknown} l
+ */
 export function setLang (l) {
   if (l === 'es' || l === 'en') lang.value = l
 }

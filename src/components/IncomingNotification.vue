@@ -3,8 +3,7 @@ import { ref, watch } from 'vue'
 import { t } from '../i18n'
 
 const props = defineProps({
-  // { id, fromNickname, text } | null
-  dm: { type: Object, default: null }
+  dm: { type: /** @type {import('vue').PropType<import('../types').IncomingNotice|null>} */ (Object), default: null }
 })
 const emit = defineEmits(['done'])
 
@@ -15,6 +14,7 @@ const FADE_IN_MS = 1000
 const VISIBLE_MS = 5000
 const FADE_OUT_MS = 1000
 
+/** @type {ReturnType<typeof setTimeout>[]} */
 let timers = []
 function clearTimers () {
   for (const t of timers) clearTimeout(t)

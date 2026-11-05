@@ -11,9 +11,13 @@
 // queda para guardarlo en el almacén, que guarda JSON.
 import { QUEUE_MAX_BYTES, RELAY_MAX_BYTES } from '@dotrino/proxy-client'
 
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string} base64 estándar
+ */
 export const toBase64 = (bytes) => {
   let s = ''
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, /** @type {number[]} */ (/** @type {unknown} */ (bytes.subarray(i, i + 0x8000))))
   return btoa(s)
 }
 
@@ -24,7 +28,13 @@ export const INLINE_IMAGE = /^image\/(png|jpeg|gif|webp|avif|bmp)$/
 // los topes del pilar, que se miden sobre el mensaje entero.
 const AROUND = 4096
 
-/** El tope, en bytes de archivo, de cada camino. `null` = sin tope. */
+/** Por dónde va un contacto (lo que dice `routeOf` del pilar). */
+/** @typedef {'socket'|'direct'|'turn'|'webrtc'|'proxy'|'offline'} Route */
+
+/**
+ * El tope, en bytes de archivo, de cada camino. `null` = sin tope.
+ * @type {Record<Route, number|null>}
+ */
 export const LIMITS = {
   socket: null,
   direct: null,
@@ -34,10 +44,22 @@ export const LIMITS = {
   offline: QUEUE_MAX_BYTES - AROUND
 }
 
-/** ¿Cabe un archivo de `bytes` por este camino? */
-export const fitsRoute = (bytes, route) => LIMITS[route] == null || bytes <= LIMITS[route]
+/**
+ * ¿Cabe un archivo de `bytes` por este camino? Un camino que no está en LIMITS no tiene tope.
+ * @param {number} bytes
+ * @param {string} route
+ * @returns {boolean}
+ */
+export const fitsRoute = (bytes, route) => {
+  const max = LIMITS[/** @type {Route} */ (route)]
+  return max == null || bytes <= max
+}
 
-/** Un nombre que se puede enseñar y usar para guardar: sin rutas ni caracteres de control. */
+/**
+ * Un nombre que se puede enseñar y usar para guardar: sin rutas ni caracteres de control.
+ * @param {unknown} name
+ * @returns {string}
+ */
 export function cleanName (name) {
   const base = String(name || '').split(/[\\/]/).pop() || ''
   // eslint-disable-next-line no-control-regex
@@ -45,6 +67,10 @@ export function cleanName (name) {
   return n || 'archivo'
 }
 
+/**
+ * @param {number} bytes
+ * @returns {string}
+ */
 export const humanSize = (bytes) => {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -53,7 +79,7 @@ export const humanSize = (bytes) => {
 
 /**
  * @param {File} file
- * @returns {Promise<{ name: string, mime: string, size: number, data: Uint8Array, w: number, h: number }>}
+ * @returns {Promise<import('../types').ChatFile>}
  */
 export async function readFile (file) {
   const bytes = new Uint8Array(await file.arrayBuffer())
@@ -67,9 +93,14 @@ export async function readFile (file) {
   return { name: cleanName(file.name), mime, size: bytes.length, data: bytes, w, h }
 }
 
-/** Lo que llega de otro lado. */
-export function validIncomingFile (f) {
-  if (!f || typeof f !== 'object') return null
+/**
+ * Lo que llega de otro lado: el archivo, o null si no es válido.
+ * @param {unknown} raw
+ * @returns {import('../types').ChatFile|null}
+ */
+export function validIncomingFile (raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const f = /** @type {{ data?: unknown, mime?: unknown, name?: unknown, w?: unknown, h?: unknown }} */ (raw)
   if (!(f.data instanceof Uint8Array) || f.data.length === 0) return null
   const mime = typeof f.mime === 'string' && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(f.mime) ? f.mime.toLowerCase() : 'application/octet-stream'
   return {
@@ -85,6 +116,8 @@ export function validIncomingFile (f) {
 /**
  * Guardar un archivo recibido. Se descarga SIEMPRE como binario, nunca se abre aquí: un HTML
  * o un SVG abierto dentro de la app correría con sus permisos.
+ * @param {string} dataUri
+ * @param {string} name
  */
 export function downloadFile (dataUri, name) {
   const b64 = dataUri.slice(dataUri.indexOf(',') + 1)

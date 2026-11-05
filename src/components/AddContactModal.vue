@@ -12,16 +12,19 @@ import '@dotrino/profile/friends-ui'
 // `peer`: llega con el enlace `#to=…` ({ pubkey, nickname, card }): ya se sabe a quién.
 const props = defineProps({
   code: { type: String, default: '' },
-  peer: { type: Object, default: null },
+  peer: { type: /** @type {import('vue').PropType<import('@dotrino/profile/friends-ui').DotrinoAddFriend['peer']>} */ (Object), default: null },
   initialTab: { type: String, default: 'add' }
 })
 const emit = defineEmits(['close'])
 
+/** @type {import('vue').Ref<import('@dotrino/profile/friends-ui').DotrinoAddFriend|null>} */
 const el = ref(null)
 onMounted(() => {
-  el.value.friends = getFriends()
+  // Montado, la referencia del template existe.
+  const node = /** @type {import('@dotrino/profile/friends-ui').DotrinoAddFriend} */ (el.value)
+  node.friends = getFriends()
   // Copia plana: el `peer` de la UI es un Proxy reactivo, y la bóveda (postMessage) no lo clona.
-  if (props.peer) el.value.peer = JSON.parse(JSON.stringify(props.peer))
+  if (props.peer) node.peer = JSON.parse(JSON.stringify(props.peer))
 })
 watch(() => props.peer, (p) => { if (el.value) el.value.peer = p ? JSON.parse(JSON.stringify(p)) : null })
 </script>

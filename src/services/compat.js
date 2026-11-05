@@ -28,11 +28,14 @@ export const MINE = declare({
  * Versiones que sabemos rotas. Vacía a propósito: se llena cuando se detecta un fallo
  * en una versión YA publicada, y solo con versiones exactas.
  */
+/** @type {import('@dotrino/compat').BrokenEntry[]} */
 const BROKEN = []
 
 /**
  * ¿Entiendo a quien me habla? Devuelve `null` si todo bien, o el motivo en llano.
  * Quien no se declara es una versión anterior a §14: se deja pasar y se dice.
+ * @param {unknown} theirs la declaración que vino en su saludo
+ * @returns {'unknown'|'incompatible'|null}
  */
 export function checkPeer (theirs) {
   if (!theirs) return 'unknown'

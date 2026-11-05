@@ -23,16 +23,26 @@ const need = async () => {
 }
 const identity = new Proxy({}, {
   // `then` no: si no, `await identity` lo tomaría por una promesa.
-  get: (_t, name) => (name === 'then' ? undefined : async (...args) => (await need())[name]?.(...args)),
+  get: (_t, name) => (name === 'then' ? undefined : async (/** @type {unknown[]} */ ...args) => {
+    // Se reenvía cualquier método por su nombre: su tipo no se puede comprobar por nombre.
+    const id = await need()
+    const fn = /** @type {Record<string|symbol, unknown>} */ (/** @type {unknown} */ (id))[name]
+    return fn == null ? undefined : /** @type {Function} */ (fn).apply(id, args)
+  }),
 })
 
 /** Lo que el messenger pone en cada momento: los stores lo rellenan al crearse. */
+/** @type {NonNullable<Parameters<typeof createFriends>[0]['hooks']>} */
 export const hooks = {}
 /** El apodo de la cuenta (lo pone connectionStore). */
 export const nickname = { value: '' }
 
+/** @type {import('@dotrino/profile/friends').Friends|null} */
 let instance = null
-/** El montaje único de `@dotrino/profile/friends` para esta app. */
+/**
+ * El montaje único de `@dotrino/profile/friends` para esta app.
+ * @returns {import('@dotrino/profile/friends').Friends}
+ */
 export function getFriends () {
   if (instance) return instance
   instance = createFriends({

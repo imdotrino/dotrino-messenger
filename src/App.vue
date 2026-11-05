@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, watch, watchEffect } from 'vue'
+import { onMounted, ref, shallowRef, computed, watch, watchEffect } from 'vue'
 import { useConnectionStore } from './stores/connectionStore'
 import { useContactsStore } from './stores/contactsStore'
 import { useThreadsStore } from './stores/threadsStore'
@@ -24,6 +24,7 @@ import { changed as accountChanged, accountId, forgetAccount } from './services/
 import { storeStatus, vaultSyncNow, getStore } from './services/store'
 import { useBackLayer } from '@dotrino/nav/vue'
 import { t, lang, setLang } from './i18n'
+import { asError } from './utils/errors'
 
 const booting = ref(true)
 
@@ -31,6 +32,7 @@ const booting = ref(true)
 // persiste en localStorage 'dotrino.lang'. Nosotros solo replicamos su elección en
 // el copy de la app (i18n.js arranca con el mismo criterio) y se la pasamos a los
 // componentes compartidos que aceptan `lang`.
+/** @param {CustomEvent<{ lang?: string }>} e */
 const onLangChange = (e) => setLang(e.detail?.lang)
 
 // El antiguo HelpTip ad-hoc (un solo coach-mark sobre el token) fue reemplazado
@@ -46,7 +48,7 @@ const retryStore = async () => {
   try {
     await vaultSyncNow()
   } catch (e) {
-    console.error('[messenger] the vault backup could not catch up:', e.code || '', e.message)
+    console.error('[messenger] the vault backup could not catch up:', asError(e).code || '', asError(e).message)
   }
 }
 const showAdd = ref(false)
@@ -81,15 +83,16 @@ const readIncomingPeer = () => {
     if (c) {
       try {
         card = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(c[1].replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0))))
-      } catch (e) { console.warn('[messenger] the #card= in the link is not readable:', e?.message) }
+      } catch (e) { console.warn('[messenger] the #card= in the link is not readable:', asError(e).message) }
     }
     return { pubkey, nickname: n ? decodeURIComponent(n[1]).slice(0, 40) : '', card }
   } catch (e) {
-    console.warn('[messenger] the #to= link does not carry a valid key:', e?.message)
+    console.warn('[messenger] the #to= link does not carry a valid key:', asError(e).message)
     return null
   }
 }
 let incomingPeer = readIncomingPeer()
+/** @type {import('vue').Ref<ReturnType<typeof readIncomingPeer>>} */
 const pendingPeer = ref(null)
 /**
  * Abre "añadir contacto" con el código del enlace ya escrito. Se llama en los dos
@@ -117,6 +120,7 @@ if (typeof window !== 'undefined') {
   })
 }
 const showNotif = ref(false)
+/** @type {import('vue').Ref<string|null>} */
 const ratingFor = ref(null)
 
 /* ----- Qué cuenta es esta -----
@@ -125,6 +129,7 @@ const ratingFor = ref(null)
  * decía: la app aparecía con el nombre de la cuenta anterior, otro avatar, sin
  * contactos y sin chats, y no había forma de saber que estabas en otra cuenta.
  */
+/** @type {import('vue').Ref<''|'switched'|'removed'|'unpaired'>} */
 const accountNotice = ref(accountChanged() ? 'switched' : '')
 const closeAccountNotice = () => { accountNotice.value = '' }
 
@@ -134,6 +139,7 @@ const closeAccountNotice = () => { accountNotice.value = '' }
  * aviso FIRMADO) y `unpaired` (se soltó la bóveda a propósito). El primero deja
  * huérfano el espejo local; el segundo NO borra nada, solo se avisa.
  */
+/** @param {import('@dotrino/identity').Identity} id */
 const listenToVault = (id) => {
   try {
     id.onVault?.((ev) => {
@@ -157,7 +163,8 @@ const addTab = ref('add')
 const openMyCode = () => { addTab.value = 'mine'; showAdd.value = true }
 
 // Panel de notificaciones = Web Component compartido <dotrino-notifications>.
-const bindNotif = (el) => { if (el) el.controller = getNotifications() }
+/** @param {unknown} el la referencia del template (null al desmontar) */
+const bindNotif = (el) => { if (el) /** @type {import('@dotrino/notifications').DotrinoNotifications} */ (el).controller = getNotifications() }
 
 // Cantidad de solicitudes pendientes — para el badge de la campana.
 const requestCount = computed(() => threads.requests.incoming.length)
@@ -166,7 +173,8 @@ const requestCount = computed(() => threads.requests.incoming.length)
 const playBeep = () => {
   if (!notifSoundEnabled()) return
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext
+    // webkitAudioContext: Safari viejo, que no lo trae con su nombre estándar.
+    const Ctx = window.AudioContext || /** @type {Window & { webkitAudioContext?: typeof AudioContext }} */ (window).webkitAudioContext
     if (!Ctx) return
     const ctx = new Ctx()
     const o = ctx.createOscillator(); const g = ctx.createGain()
@@ -182,7 +190,9 @@ const playBeep = () => {
 
 // Notificación centrada de DM entrante. Solo se enseña la primera vez que se ve
 // un DM nuevo: lo ya mostrado queda anotado (services/displayedMessages).
+/** @type {import('vue').Ref<import('./types').IncomingNotice|null>} */
 const incomingNotification = ref(null)
+/** @param {string} id */
 const onIncomingDone = (id) => {
   if (incomingNotification.value?.id === id) incomingNotification.value = null
 }
@@ -246,6 +256,7 @@ const announceToKnown = async () => {
   }
 }
 
+/** @param {string} nick */
 const handleNicknameSet = async (nick) => {
   connection.setNickname(nick)
   await connection.connect()
@@ -255,21 +266,28 @@ const handleNicknameSet = async (nick) => {
   useIncomingCode()
 }
 
+/** @param {string} pubkey */
 const onSelectContact = (pubkey) => {
   threads.setActive(pubkey)
   showSidebarMobile.value = false
 }
 
 const backToList = () => { showSidebarMobile.value = true; threads.setActive(null) }
+/** @param {string} pubkey */
 const openRating = (pubkey) => { ratingFor.value = pubkey }
 
 /* ----- Topbar estándar (§5) + "Mi perfil" (§6.1) -----
  * El topbar es DUEÑO del modal "Mi perfil": le pasamos los pilares que la app ya
  * maneja (identity + reputation) por propiedad JS y él abre <dotrino-profile
  * mode="self"> solo, con el avatar del perfil activo en el botón. */
+/** @type {import('vue').Ref<import('@dotrino/topbar').DotrinoTopbar|null>} */
 const topbarRef = ref(null)
-const identityInst = ref(null)
-const reputationInst = ref(null)
+// shallowRef: la instancia de Identity no puede ir envuelta en el Proxy reactivo de un
+// ref() (el puente con el iframe hace postMessage y un Proxy no se puede clonar).
+/** @type {import('vue').ShallowRef<import('@dotrino/identity').Identity|null>} */
+const identityInst = shallowRef(null)
+/** @type {import('vue').ShallowRef<import('@dotrino/reputation').VaultReputation|null>} */
+const reputationInst = shallowRef(null)
 
 watchEffect(() => {
   const tb = topbarRef.value

@@ -5,6 +5,10 @@ import { useContactsStore } from '../stores/contactsStore'
 import { t, locale } from '../i18n'
 import { useConnectionStore } from '../stores/connectionStore'
 import { INLINE_IMAGE, LIMITS, fitsRoute, humanSize, downloadFile } from '../utils/file'
+import { asError } from '../utils/errors'
+
+/** @typedef {import('../utils/file').Route} Route */
+/** @typedef {import('../types').ThreadEntry} ThreadEntry */
 
 
 const threads = useThreadsStore()
@@ -13,13 +17,16 @@ const connection = useConnectionStore()
 const emit = defineEmits(['back', 'rate'])
 
 const text = ref('')
+/** @type {import('vue').Ref<HTMLElement|null>} */
 const scroller = ref(null)
+/** @type {import('vue').Ref<HTMLInputElement|null>} */
 const fileInput = ref(null)
 const sendingFile = ref(false)
 const fileError = ref('')
 // Aviso de tope: el archivo no cabe por el camino de ahora y va a esperar (no es un error).
 const fileNotice = ref('')
 // La foto que se abre a pantalla completa (data URI), o null.
+/** @type {import('vue').Ref<string|null>} */
 const viewing = ref(null)
 
 
@@ -39,18 +46,24 @@ const noDevices = computed(() => {
 // POR DÓNDE VA ESTE CONTACTO AHORA, y con qué tope (dueño, 2026-10-15). Se vuelve a
 // preguntar al cambiar de contacto, cuando el pilar avisa de un cambio de camino, al
 // conectarse o irse el contacto, y cada pocos segundos por si el canal pasó a ir por relevo.
+/** @type {import('vue').Ref<Route>} */
 const route = ref('offline')
 const refreshRoute = async () => {
   const pk = c.value?.publickey
   if (!pk) return
   const r = await threads.routeOf(pk).catch(() => 'offline')
-  if (c.value?.publickey === pk) route.value = r
+  // El pilar lo declara como string; sus valores son los de Route.
+  if (c.value?.publickey === pk) route.value = /** @type {Route} */ (r)
 }
 watch(() => [c.value?.publickey, connection.routeTick, online.value, connection.isConnected], refreshRoute, { immediate: true })
 const routeTimer = setInterval(refreshRoute, 5000)
 onUnmounted(() => clearInterval(routeTimer))
-const routeLimit = computed(() => LIMITS[route.value] == null ? t.value.conv.route.noLimit : t.value.conv.route.upTo.replace('{size}', humanSize(LIMITS[route.value])))
+const routeLimit = computed(() => {
+  const max = LIMITS[route.value]
+  return max == null ? t.value.conv.route.noLimit : t.value.conv.route.upTo.replace('{size}', humanSize(max))
+})
 
+/** @param {number|null} val */
 const stars = (val) => {
   if (val == null) return ''
   const full = Math.round(val)
@@ -61,7 +74,8 @@ const send = async () => {
   const v = text.value
   if (!v.trim()) return
   text.value = ''
-  await threads.sendDM(c.value.publickey, v)
+  // El campo solo se ve con una conversación abierta.
+  await threads.sendDM(/** @type {NonNullable<typeof c.value>} */ (c.value).publickey, v)
   scrollDown()
 }
 
@@ -69,9 +83,11 @@ const pickFile = () => { fileError.value = ''; fileNotice.value = ''; fileInput.
 
 // El archivo sale TAL CUAL; el texto escrito va como pie. Si no cabe por el camino de ahora,
 // se dice antes de mandarlo, con el tope de ese camino, y queda esperando al que le sirve.
+/** @param {Event} ev */
 const onFilePicked = async (ev) => {
-  const file = ev.target.files?.[0]
-  ev.target.value = ''
+  const input = /** @type {HTMLInputElement} */ (ev.target)
+  const file = input.files?.[0]
+  input.value = ''
   if (!file || !c.value) return
   sendingFile.value = true
   fileError.value = ''
@@ -81,21 +97,23 @@ const onFilePicked = async (ev) => {
     const n = t.value.conv.notice
     fileNotice.value = (route.value === 'proxy' ? n.proxy : n.offline)
       .replace('{size}', humanSize(file.size))
-      .replace('{limit}', humanSize(LIMITS[route.value]))
+      .replace('{limit}', humanSize(/** @type {number} */ (LIMITS[route.value])))
   }
   try {
     await threads.sendFile(c.value.publickey, file, text.value)
     text.value = ''
     scrollDown()
   } catch (e) {
-    console.warn('[messenger] file not sent:', e?.code || '', e?.message)
+    console.warn('[messenger] file not sent:', asError(e).code || '', asError(e).message)
     fileError.value = t.value.conv.fileError
   } finally {
     sendingFile.value = false
   }
 }
 
+/** @param {ThreadEntry} item */
 const isInline = (item) => INLINE_IMAGE.test(item.file?.mime || '')
+/** @param {string} mime */
 const fileIcon = (mime) => /^image\//.test(mime) ? '🖼' : /^video\//.test(mime) ? '🎞' : /^audio\//.test(mime) ? '🎵' : /pdf$/.test(mime) ? '📕' : '📄'
 
 const scrollDown = () => nextTick(() => {
@@ -103,10 +121,12 @@ const scrollDown = () => nextTick(() => {
 })
 
 watch(() => threads.activeThread.length, scrollDown)
-watch(() => threads.activePubkey, (pk) => { threads.loadFiles(pk); scrollDown() }, { immediate: true })
+watch(() => threads.activePubkey, (pk) => { if (pk) threads.loadFiles(pk); scrollDown() }, { immediate: true })
 
 // Los separadores de día son texto visible: siguen el idioma de la app.
+/** @param {number} ts */
 const fmtTime = (ts) => new Date(ts).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+/** @param {number} ts */
 const fmtDay = (ts) => {
   const d = new Date(ts)
   const now = new Date()
@@ -118,7 +138,9 @@ const fmtDay = (ts) => {
 
 // Group messages by day for the separators.
 const grouped = computed(() => {
+  /** @type {Array<{ kind: 'sep', ts: number, key: string } | ({ kind: 'msg', key?: undefined } & ThreadEntry)>} */
   const out = []
+  /** @type {string|null} */
   let lastDay = null
   for (const m of threads.activeThread) {
     const day = new Date(m.ts).toDateString()
@@ -144,7 +166,7 @@ const grouped = computed(() => {
         <div class="row">
           <strong class="name">{{ c.nickname }}</strong>
           <span
-            v-if="rating.value != null"
+            v-if="rating && rating.value != null"
             :class="['stars', rating.source]"
             @click="emit('rate', c.publickey)"
             :title="rating.source === 'mine' ? t.list.ratingMine : t.list.ratingDerived"
@@ -176,7 +198,7 @@ const grouped = computed(() => {
         </div>
       </div>
       <template v-else>
-        <div v-for="item in grouped" :key="item.key || item.id">
+        <div v-for="item in grouped" :key="item.kind === 'sep' ? item.key : item.id">
           <div v-if="item.kind === 'sep'" class="day-sep">
             <span>{{ fmtDay(item.ts) }}</span>
           </div>

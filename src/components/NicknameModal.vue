@@ -3,7 +3,9 @@ import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
 const emit = defineEmits(['set'])
 const nick = ref('')
+/** @type {import('vue').Ref<HTMLInputElement|null>} */
 const inputEl = ref(null)
+/** @param {string} v */
 const valid = (v) => v.trim().length >= 3 && v.trim().length <= 20
 const submit = () => { if (valid(nick.value)) emit('set', nick.value.trim()) }
 // Foco programático en lugar de `autofocus`: Chrome lo bloquea en iframes

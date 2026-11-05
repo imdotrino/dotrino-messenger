@@ -8,6 +8,7 @@ import { key as accountKey } from './account'
 const lsKey = () => accountKey('cc_displayed_msgs_v1')
 const MAX = 500
 
+/** @type {Set<string>} */
 let cache = new Set()
 let loaded = false
 
@@ -20,6 +21,10 @@ function ensureLoaded () {
   } catch (_) {}
 }
 
+/**
+ * @param {string|null|undefined} id
+ * @returns {Promise<boolean>} sin id cuenta como ya mostrado
+ */
 export async function isDisplayed (id) {
   if (!id) return true
   ensureLoaded()
@@ -29,6 +34,8 @@ export async function isDisplayed (id) {
 /**
  * Marca un id como mostrado. Idempotente. Devuelve `true` si era nuevo,
  * `false` si ya estaba.
+ * @param {string|null|undefined} id
+ * @returns {Promise<boolean>}
  */
 export async function markDisplayed (id) {
   if (!id) return false

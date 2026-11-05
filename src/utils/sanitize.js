@@ -26,6 +26,10 @@
  * (Este filtro existía desde siempre, pero era código muerto: el escapado
  * corría antes y convertía `<` en `&lt;`, que ya no casaba con el filtro.)
  */
+/**
+ * @param {unknown} nick
+ * @returns {string}
+ */
 export function sanitizeNickname (nick) {
   if (!nick || typeof nick !== 'string') {
     return ''
@@ -37,6 +41,10 @@ export function sanitizeNickname (nick) {
 /**
  * Mensaje: se recorta y se limita el largo. Nada más — el texto del usuario
  * llega al otro lado letra por letra.
+ */
+/**
+ * @param {unknown} text
+ * @returns {string}
  */
 export function sanitizeMessage (text) {
   if (!text || typeof text !== 'string') {

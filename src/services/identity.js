@@ -15,7 +15,9 @@
 
 import { Identity } from '@dotrino/identity'
 
+/** @type {Identity|null} */
 let _instance = null
+/** @type {Promise<Identity|null>|null} */
 let _connectPromise = null
 
 /**
@@ -23,6 +25,7 @@ let _connectPromise = null
  * `ready` haya completado. Reutiliza la promesa entre llamadas concurrentes.
  * Devuelve `null` si el vault no está alcanzable (e.g. iframe blocked) en
  * lugar de tirar — los stores tienen fallbacks para ese caso.
+ * @returns {Promise<Identity|null>}
  */
 export async function getIdentity () {
   if (_instance) return _instance
@@ -42,7 +45,10 @@ export async function getIdentity () {
   return _connectPromise
 }
 
-/** Acceso síncrono (puede devolver null si aún no completó connect). */
+/**
+ * Acceso síncrono (puede devolver null si aún no completó connect).
+ * @returns {Identity|null}
+ */
 export function currentIdentity () {
   return _instance
 }

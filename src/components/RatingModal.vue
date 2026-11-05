@@ -22,6 +22,7 @@ const emit  = defineEmits(['close'])
 const contacts = useContactsStore()
 const threads = useThreadsStore()
 
+/** @type {import('vue').Ref<import('@dotrino/profile').DotrinoProfile|null>} */
 const el = ref(null)
 const contact = computed(() => contacts.findByPubkey(props.pubkey))
 const peer = computed(() => contacts.peerFor(props.pubkey))

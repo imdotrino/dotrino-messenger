@@ -33,34 +33,49 @@ const LEGACY_KEYS = [
   'cc_displayed_msgs_v1'
 ]
 
+/** @type {string|null} */
 let _id = null        // id de la cuenta activa ('pXXXXXXXX'), o null si no hay vault
+/** @type {string|null} */
 let _previous = null  // la que había la última vez, si es otra
 let _changed = false
 let _resolved = false
 
-/** Id de la cuenta activa. `null` si el vault no contestó (modo degradado). */
+/**
+ * Id de la cuenta activa. `null` si el vault no contestó (modo degradado).
+ * @returns {string|null}
+ */
 export function accountId () { return _id }
 
-/** ¿La cuenta activa NO es la de la última visita? */
+/**
+ * ¿La cuenta activa NO es la de la última visita?
+ * @returns {boolean}
+ */
 export function changed () { return _changed }
 
-/** La cuenta anterior, cuando cambió. Para poder decir qué pasó. */
+/**
+ * La cuenta anterior, cuando cambió. Para poder decir qué pasó.
+ * @returns {string|null}
+ */
 export function previousAccount () { return _previous }
 
 /**
  * Clave de almacenamiento de ESTA cuenta. Sin cuenta resuelta se devuelve la clave
  * pelada: es el modo degradado (vault inalcanzable), y ahí es preferible seguir
  * funcionando en un cajón común a no funcionar.
+ * @param {string} base
+ * @returns {string}
  */
 export function key (base) { return _id ? `${base}::${_id}` : base }
 
 /**
  * Resuelve la cuenta activa y adopta el estado de la versión sin namespace.
  * Idempotente; se llama una vez desde `main.js` antes de montar.
+ * @returns {Promise<{ id: string|null, changed: boolean }>}
  */
 export async function resolveAccount () {
   if (_resolved) return { id: _id, changed: _changed }
   _resolved = true
+  /** @type {string|null} */
   let id = null
   try {
     const identity = await getIdentity()
@@ -70,6 +85,7 @@ export async function resolveAccount () {
   _id = id
   if (!id) return { id: null, changed: false }
 
+  /** @type {string|null} */
   let saved = null
   try { saved = localStorage.getItem(ACCOUNT_KEY) } catch (_) {}
 
@@ -87,7 +103,10 @@ export async function resolveAccount () {
   return { id: _id, changed: _changed }
 }
 
-/** Mueve el estado sin namespace al de la cuenta `id`. No pisa lo que ya exista. */
+/**
+ * Mueve el estado sin namespace al de la cuenta `id`. No pisa lo que ya exista.
+ * @param {string} id
+ */
 function adoptLegacy (id) {
   for (const base of LEGACY_KEYS) {
     try {
@@ -105,6 +124,7 @@ function adoptLegacy (id) {
  * aparato lo echaron: el store del ecosistema ya limpia sus hilos, y esto limpia el
  * espejo del messenger, que si no se quedaría enseñando los mensajes de una cuenta
  * que ya no es de nadie.
+ * @param {string|null} id
  */
 export function forgetAccount (id) {
   if (!id) return

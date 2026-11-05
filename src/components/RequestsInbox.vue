@@ -6,8 +6,10 @@ import { getFriends } from '../services/friends'
 // y las que mandaste, esperando.
 import '@dotrino/profile/friends-ui'
 
+/** @type {import('vue').Ref<import('@dotrino/profile/friends-ui').DotrinoFriendRequests|null>} */
 const el = ref(null)
-onMounted(() => { el.value.friends = getFriends() })
+// Montado, la referencia del template existe.
+onMounted(() => { /** @type {import('@dotrino/profile/friends-ui').DotrinoFriendRequests} */ (el.value).friends = getFriends() })
 </script>
 
 <template>

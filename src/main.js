@@ -21,7 +21,7 @@ createBackNav()
 try {
   let topOrigin = null
   let topAccessible = false
-  try { topOrigin = window.top.location.origin; topAccessible = true }
+  try { topOrigin = /** @type {Window} */ (window.top).location.origin; topAccessible = true }
   catch (_) { topOrigin = '(cross-origin, blocked)' }
   console.log('[cc-messenger] context', {
     origin: location.origin,

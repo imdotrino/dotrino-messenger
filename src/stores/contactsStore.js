@@ -20,6 +20,8 @@ export const useContactsStore = defineStore('contacts', () => {
   const friends = getFriends()
   const book = friends.book
 
+  /** @typedef {import('../types').Peer} Peer */
+  /** @type {import('vue').Ref<Peer[]>} */
   const peers = ref([])              // todos los registros de la libreta
   const onlineTick = ref(0)          // presencia de esta sesión (la lleva @dotrino/profile/friends)
   const ratingTick = ref(0)
@@ -42,32 +44,75 @@ export const useContactsStore = defineStore('contacts', () => {
   // backward-compat alias used elsewhere
   const refreshPeers = refresh
 
+  /** @param {Parameters<typeof book.add>[0]} c */
   const addContact = (c) => book.add(c)
+  /**
+   * @param {string} pubkey
+   * @param {Record<string, unknown>} patch
+   */
   const updateContact = (pubkey, patch) => book.update(pubkey, patch)
+  /** @param {string} pubkey */
   const removeContact = (pubkey) => book.remove(pubkey)
 
   // Lo que se lee de la libreta: lo calcula @dotrino/profile/friends. Se toca `peers` para que Vue
   // vuelva a pintar cuando cambie.
+  /**
+   * @param {string} pubkey
+   * @returns {Peer|null}
+   */
   const findByPubkey = (pubkey) => (peers.value, book.find(pubkey))
+  /** @param {string} pubkey */
   const isPinned = (pubkey) => book.isPinned(pubkey)
   // El AVATAR es el del ecosistema: el identicon DETERMINISTA del pubkey, el mismo que pintan
   // <dotrino-topbar> y <dotrino-profile>; no cambia con el apodo porque la llave no cambia.
   // La excepción es Dotrino, el contacto fijo: lleva su logo, para que se reconozca de un vistazo.
+  /**
+   * @param {string} pubkey
+   * @param {{ size?: number }} [opts]
+   * @returns {string} URL de la imagen
+   */
   const avatarFor = (pubkey, opts) => (isPinned(pubkey) ? dotrinoLogo : avatarDataUri(pubkey, opts))
+  /** @param {string} pubkey */
   const cardOf = (pubkey) => (peers.value, book.cardOf(pubkey))
+  /**
+   * @param {string} pubkey
+   * @returns {Peer|null}
+   */
   const findBySender = (pubkey) => (peers.value, book.findBySender(pubkey))
+  /**
+   * @param {string} from
+   * @param {string} account
+   */
   const moveToAccount = (from, account) => book.moveToAccount(from, account)
+  /** @param {string} token */
   const findByToken = (token) => contacts.value.find(c => c.lastToken === token)
+  /**
+   * @param {string} pubkey
+   * @returns {Peer|null}
+   */
   const peerFor = (pubkey) => (peers.value, book.peer(pubkey))
+  /**
+   * @param {unknown} card
+   * @param {string} devicePubkey
+   */
   const accountFromCard = (card, devicePubkey) => book.accountFromCard(card, devicePubkey)
+  /** @param {string} pubkey */
   const recipientsOf = (pubkey) => (peers.value, book.recipientsOf(pubkey))
 
   // ---- Presencia de esta sesión (no se guarda): la lleva @dotrino/profile/friends ----
+  /**
+   * @param {string} pubkey
+   * @param {string} token
+   */
   const markOnline = (pubkey, token) => friends.markOnline(pubkey, token)
+  /** @param {string} token */
   const markOffline = (token) => friends.markOffline(token)
+  /** @param {string} pubkey */
   const isOnline = (pubkey) => (onlineTick.value, friends.isOnline(pubkey))
   // Token "fresco": solo de la sesión actual. Sin él se va por pubkey (la cola offline).
+  /** @param {string} pubkey */
   const liveTokenFor = (pubkey) => (onlineTick.value, friends.liveTokenFor(pubkey))
+  /** @param {string} pubkey */
   const tokenFor = (pubkey) => (onlineTick.value, friends.tokenFor(pubkey))
 
   // ---- Rating -------------------------------------------------------------
@@ -75,9 +120,15 @@ export const useContactsStore = defineStore('contacts', () => {
   // `valueOrIndicators`: número (= confianza) o mapa { confianza, afinidad, ... }.
   // La confianza se guarda en el vault local (web-of-trust); el mapa completo se
   // atesta firmado en el registro. La reputación se pondera por confianza (anti-sybil).
+  /**
+   * @param {string} pubkey
+   * @param {number | Record<string, number> | null} valueOrIndicators
+   * @param {string} [notes]
+   */
   const ratePeer = async (pubkey, valueOrIndicators, notes) => {
     const id = await getIdentity()
     if (!id) throw new Error('identity vault unreachable')
+    /** @type {Record<string, number>} */
     const indicators = typeof valueOrIndicators === 'number'
       ? { confianza: valueOrIndicators }
       : (valueOrIndicators || {})
@@ -91,6 +142,10 @@ export const useContactsStore = defineStore('contacts', () => {
 
   // Mis propios indicadores hacia un peer (desde mi atestación en el registro),
   // p.ej. para precargar el control de afinidad. {} si no tengo atestación.
+  /**
+   * @param {string} pubkey
+   * @returns {Promise<Record<string, number>>}
+   */
   const myIndicatorsFor = async (pubkey) => {
     try {
       const rep = await getReputation()
@@ -101,18 +156,31 @@ export const useContactsStore = defineStore('contacts', () => {
     } catch (_) { return {} }
   }
 
+  /**
+   * @param {string|null|undefined} pubkey
+   * @returns {import('../types').DerivedRating}
+   */
   const ratingFor = (pubkey) => {
     if (!pubkey) return { value: null, source: null, count: 0 }
     return computeDerivedRating(peerFor(pubkey), trustMap.value)
   }
+  /**
+   * @param {string} pubkey
+   * @returns {number|null}
+   */
   const myRatingFor = (pubkey) => peerFor(pubkey)?.myRating?.rating ?? null
   /** Bloqueado por mí (privado, en el libro de contactos; identity ≥ 0.108). */
   // A Dotrino no se le bloquea: es el canal de las respuestas a lo que pediste.
+  /** @param {string} pubkey */
   const isBlocked = (pubkey) => (peers.value, book.isBlocked(pubkey))
 
   // Reputación de la NUBE ponderada por mi web-of-trust (rellena el cold-start
   // con lo que dice mi red, no solo lo que recibí por el proxy). Async → para
   // un badge enriquecido. Devuelve null si no hay datos confiables.
+  /**
+   * @param {string|null|undefined} pubkey
+   * @returns {Promise<import('@dotrino/reputation').AggregateResult|null>}
+   */
   const cloudReputationFor = async (pubkey) => {
     if (!pubkey) return null
     try {
