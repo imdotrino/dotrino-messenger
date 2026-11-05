@@ -85,12 +85,38 @@ async function enter (browser, nickname) {
     }
   })
   const page = await context.newPage()
+  // Lo que pasa por el WebSocket del proxio, para quien lo quiera mirar (waitForQueued).
+  const wire = new Set()
+  page.on('websocket', (ws) => {
+    ws.on('framesent', ({ payload }) => { for (const l of wire) l('sent', payload) })
+    ws.on('framereceived', ({ payload }) => { for (const l of wire) l('received', payload) })
+  })
   await page.goto(SITE, { waitUntil: 'domcontentloaded' })
   const nick = page.getByTestId('nickname-input')
   await nick.waitFor({ timeout: WAIT })
   await nick.fill(nickname)
   await page.getByTestId('nickname-submit').click()
-  return { context, page }
+  return { context, page, wire }
+}
+
+/**
+ * Resuelve cuando el proxio contesta `message_sent` con algo en `queued` a un mensaje dirigido
+ * NO callado que la página mandó después de llamar a esto. Se arma ANTES de enviar.
+ */
+function waitForQueued (wire) {
+  return new Promise((resolve, reject) => {
+    let sent = false
+    const parse = (payload) => { try { return typeof payload === 'string' ? JSON.parse(payload) : null } catch (_) { return null } }
+    const listener = (dir, payload) => {
+      const m = parse(payload)
+      if (!m) return
+      if (dir === 'sent' && m.to_publickey && !m.quiet) sent = true
+      if (dir === 'received' && sent && m.type === 'message_sent' && Array.isArray(m.queued) && m.queued.length) done(m)
+    }
+    const timer = setTimeout(() => { wire.delete(listener); reject(new Error('the proxy never queued the message')) }, WAIT)
+    const done = (m) => { clearTimeout(timer); wire.delete(listener); resolve(m) }
+    wire.add(listener)
+  })
 }
 
 test('cola offline: DM a un peer offline se entrega al reconectar', async () => {
@@ -121,12 +147,17 @@ test('cola offline: DM a un peer offline se entrega al reconectar', async () => 
     await expect(alice.page.getByTestId('route')).toHaveAttribute('data-route', 'offline', { timeout: WAIT })
 
     // Alice le escribe a Bob desconectado → cae a la cola del proxio.
+    // El ✓ lo pone el acuse de Bob (0.8.3), así que con Bob fuera se queda en ⌛. Lo que dice
+    // que el proxio ya lo tiene en la cola es su respuesta `message_sent` con `queued`, que va
+    // en claro por el WebSocket de Alice: sin ella, Bob podría volver antes de que haya nada
+    // que drenar. Los saludos (HELLO) van `quiet`; el mensaje no, y así se distinguen.
+    const queuedInProxy = waitForQueued(alice.wire)
     const message = `offline ${runTag} ${Date.now()}`
     await alice.page.getByTestId('composer-input').fill(message)
     await alice.page.getByTestId('send-message').click()
-    // El ✓ dice que el proxio ya lo tiene en la cola; antes de eso Bob no tiene nada que drenar.
+    await queuedInProxy
     await expect(alice.page.getByTestId('msg-out').filter({ hasText: message }).locator('.check'))
-      .toHaveText('✓', { timeout: WAIT })
+      .toHaveText('⌛')
 
     // Bob reabre (mismo contexto) → reconecta, identify drena la cola.
     bob.page = await bob.context.newPage()
@@ -135,6 +166,9 @@ test('cola offline: DM a un peer offline se entrega al reconectar', async () => 
     await item.waitFor({ timeout: WAIT })
     await item.click()
     await expect(bob.page.getByTestId('msg-in').filter({ hasText: message })).toBeVisible({ timeout: WAIT })
+    // Y el acuse de Bob vuelve a Alice: ahora sí, ✓.
+    await expect(alice.page.getByTestId('msg-out').filter({ hasText: message }).locator('.check'))
+      .toHaveText('✓', { timeout: WAIT })
   } finally {
     await alice.context.close().catch(() => {})
     await bob.context.close().catch(() => {})
